@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { call, type PinItem } from "../api";
 import { css } from "../lib/color";
 import { clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
 import { Cover } from "./Compact";
-import { ICheck, IChevron, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
+import { ICheck, IChevron, IHeart, IHeartOff, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
 import type { PanelProps } from "./Panel";
 
 function useTicker(active: boolean, ms = 250) {
@@ -17,7 +17,62 @@ function useTicker(active: boolean, ms = 250) {
   return now;
 }
 
-function MediaCard({ media, mediaAt, cover, accent }: Pick<PanelProps, "media" | "mediaAt" | "cover" | "accent">) {
+interface YmState {
+  available: boolean;
+  trackId: string;
+  liked: boolean;
+  disliked: boolean;
+  error?: string;
+}
+
+const isYandex = (m: { app: string; appId: string }) => /yandex/i.test(m.appId) || /Яндекс Музыка/.test(m.app);
+
+/** ♥ / «не рекомендовать» for the current Yandex Music track. */
+function useYm(media: PanelProps["media"], token: string) {
+  const [st, setSt] = useState<YmState | null>(null);
+  const key = media && isYandex(media) ? `${media.artist}\u0001${media.title}` : "";
+  const load = useCallback(() => {
+    if (!media || !key || !token) return setSt(null);
+    call<YmState>("ym_state", { artist: media.artist, title: media.title, durationMs: media.durationMs })
+      .then(setSt)
+      .catch(() => setSt(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, token]);
+  useEffect(load, [load]);
+  return [st, setSt, !!key] as const;
+}
+
+function MediaCard({
+  media,
+  mediaAt,
+  cover,
+  accent,
+  settings,
+  toast,
+  setTab,
+}: Pick<PanelProps, "media" | "mediaAt" | "cover" | "accent" | "settings" | "toast" | "setTab">) {
+  const [ym, setYm, ymPlayer] = useYm(media, settings.ymToken);
+  const rate = async (kind: "like" | "dislike") => {
+    if (!settings.ymToken) {
+      toast({ icon: "error", tone: "error", title: "Войдите в Яндекс Музыку", subtitle: "Настройки → Яндекс Музыка" }, 3500);
+      setTab("settings");
+      return;
+    }
+    if (!ym?.available) {
+      toast({ icon: "error", tone: "error", title: ym?.error ? "Не получилось" : "Трек не найден в Яндекс Музыке", subtitle: ym?.error }, 3500);
+      return;
+    }
+    const on = kind === "like" ? !ym.liked : !ym.disliked;
+    // optimistic: a like clears the dislike and vice versa
+    setYm({ ...ym, liked: kind === "like" ? on : false, disliked: kind === "dislike" ? on : false });
+    try {
+      await call("ym_set", { trackId: ym.trackId, kind, on });
+      if (on) toast({ icon: "check", title: kind === "like" ? "Добавлено в «Мне нравится»" : "Не рекомендовать", subtitle: media?.title }, 2000);
+    } catch (e) {
+      setYm(ym);
+      toast({ icon: "error", tone: "error", title: "Не получилось", subtitle: String(e) }, 3500);
+    }
+  };
   const now = useTicker(!!media?.playing || !media, media ? 250 : 1000);
   if (!media) {
     const d = new Date(now);
@@ -61,6 +116,11 @@ function MediaCard({ media, mediaAt, cover, accent }: Pick<PanelProps, "media" |
           <span>{dur ? `-${clock(dur - pos)}` : ""}</span>
         </div>
         <div className="media-controls">
+          {ymPlayer && (
+            <button className={`ctl ctl-rate ${ym?.liked ? "on" : ""}`} onClick={() => rate("like")} title={ym?.liked ? "Убрать из «Мне нравится»" : "Мне нравится"}>
+              <IHeart size={19} filled={ym?.liked} />
+            </button>
+          )}
           <button className="ctl" disabled={!media.canPrev} onClick={() => call("media_control", { action: "prev" })} title="Назад">
             <IPrev size={20} />
           </button>
@@ -70,6 +130,11 @@ function MediaCard({ media, mediaAt, cover, accent }: Pick<PanelProps, "media" |
           <button className="ctl" disabled={!media.canNext} onClick={() => call("media_control", { action: "next" })} title="Вперёд">
             <INext size={20} />
           </button>
+          {ymPlayer && (
+            <button className={`ctl ctl-rate ${ym?.disliked ? "on" : ""}`} onClick={() => rate("dislike")} title={ym?.disliked ? "Снова рекомендовать" : "Не рекомендовать (и следующий трек)"}>
+              <IHeartOff size={19} filled={ym?.disliked} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -227,7 +292,7 @@ export function Home(p: PanelProps) {
   return (
     <div className="home">
       <div className="home-left">
-        <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} />
+        <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} toast={p.toast} setTab={p.setTab} />
         <VolumeRow volume={p.volume} />
       </div>
       <div className="actions">

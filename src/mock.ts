@@ -51,6 +51,7 @@ const state = {
     notesEnabled: true,
     residentsEnabled: true,
     residents: ["jelly", "cat", "ghost"],
+    ymToken: "demo",
   },
   data: {
     shelf: [
@@ -240,6 +241,18 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
         300,
       );
       return r(null);
+    case "ym_state": {
+      const w = window as any;
+      w.__ym ??= { liked: false, disliked: false };
+      return r({ available: true, trackId: "1", ...w.__ym });
+    }
+    case "ym_set": {
+      const w = window as any;
+      w.__ym ??= { liked: false, disliked: false };
+      if (args.kind === "like") w.__ym = { liked: args.on, disliked: false };
+      else w.__ym = { liked: false, disliked: args.on };
+      return r(null);
+    }
     case "audio_devices":
       return r([
         { id: "a", name: "Динамики (Realtek(R) Audio)", default: state.volume.device === "Динамики" },

@@ -385,6 +385,27 @@ export function SettingsTab({
           <CityPicker settings={settings} save={save} setBusy={setBusy} />
         </div>
 
+        <div className="settings-section">Яндекс Музыка</div>
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">{settings.ymToken ? "Аккаунт подключён" : "Лайки и дизлайки"}</div>
+            <div className="setting-sub">
+              {settings.ymToken
+                ? "♥ и «не рекомендовать» на главной ставятся в вашу Яндекс Музыку"
+                : "Войдите, чтобы ставить ♥ и «не рекомендовать» прямо с острова. Токен хранится только на этом компьютере"}
+            </div>
+          </div>
+          {settings.ymToken ? (
+            <button className="text-btn" onClick={() => call("ym_logout")}>
+              Выйти
+            </button>
+          ) : (
+            <button className="tt-paste" onClick={() => call("ym_login")}>
+              Войти
+            </button>
+          )}
+        </div>
+
         <div className="settings-section">Жильцы</div>
         <div className="setting">
           <div>

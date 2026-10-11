@@ -9,6 +9,7 @@ mod native;
 mod store;
 mod voice;
 mod weather;
+mod ym;
 
 use std::collections::HashMap;
 use std::fs;
@@ -202,6 +203,7 @@ struct Shared {
     voice_tx: Mutex<Sender<VoiceCmd>>,
     voice_active: AtomicBool,
     recording: Mutex<Option<record::Recording>>,
+    ym: ym::Shared,
 }
 
 #[derive(Serialize, Clone)]
@@ -1981,6 +1983,95 @@ fn weather_refresh(state: St<'_>) {
     let _ = lock(&state.weather_wake).send(());
 }
 
+// ---------------------------------------------------------------------------
+// Yandex Music: like / dislike
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+async fn ym_state(state: St<'_>, artist: String, title: String, duration_ms: Option<i64>) -> Result<ym::TrackState, String> {
+    let shared = state.inner().clone();
+    let token = lock(&shared.settings).ym_token.clone();
+    Ok(ym::state(&shared.ym, &token, &artist, &title, duration_ms.unwrap_or(0)).await)
+}
+
+/// kind: "like" | "dislike". A dislike also skips to the next track, like the app does.
+#[tauri::command]
+async fn ym_set(state: St<'_>, track_id: String, kind: String, on: bool) -> Result<(), String> {
+    let shared = state.inner().clone();
+    let token = lock(&shared.settings).ym_token.clone();
+    if token.is_empty() {
+        return Err("Войдите в Яндекс Музыку в настройках".into());
+    }
+    let list = if kind == "dislike" { "dislikes" } else { "likes" };
+    ym::set(&shared.ym, &token, &track_id, list, on).await?;
+    if kind == "dislike" && on {
+        let _ = lock(&shared.media_tx).send(MediaCmd {
+            action: "next".into(),
+            value: 0.0,
+        });
+    }
+    Ok(())
+}
+
+fn save_ym_token(app: &AppHandle, token: String) {
+    let shared = app.state::<Arc<Shared>>().inner().clone();
+    let next = {
+        let mut s = lock(&shared.settings);
+        s.ym_token = token;
+        s.clone()
+    };
+    save_json(&shared.paths.settings(), &next);
+    let _ = app.emit("settings", next);
+}
+
+/// Opens the Yandex login page; the token is taken from the redirect URL.
+#[tauri::command]
+fn ym_login(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("ymlogin") {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let url: tauri::Url = ym::LOGIN_URL.parse().map_err(|_| "bad login url".to_string())?;
+    let handle = app.clone();
+    WebviewWindowBuilder::new(&app, "ymlogin", WebviewUrl::External(url))
+        .title("Вход в Яндекс Музыку")
+        .inner_size(480.0, 680.0)
+        .center()
+        .on_navigation(move |u| {
+            if let Some(token) = ym::token_from_url(u.as_str()) {
+                save_ym_token(&handle, token);
+                let h = handle.clone();
+                // close after the navigation callback has returned
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(150));
+                    if let Some(w) = h.get_webview_window("ymlogin") {
+                        let _ = w.close();
+                    }
+                    toast(
+                        &h,
+                        ToastPayload {
+                            icon: "check".into(),
+                            title: "Яндекс Музыка подключена".into(),
+                            subtitle: Some("Лайки и дизлайки — на главной".into()),
+                            ms: Some(3000),
+                            ..Default::default()
+                        },
+                    );
+                });
+                return false;
+            }
+            true
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn ym_logout(app: AppHandle) {
+    save_ym_token(&app, String::new());
+}
+
 #[tauri::command]
 fn voice(state: St<'_>, action: String) {
     let cmd = match action.as_str() {
@@ -2174,6 +2265,7 @@ fn main() {
                 voice_tx: Mutex::new(voice_tx),
                 voice_active: AtomicBool::new(false),
                 recording: Mutex::new(None),
+                ym: Mutex::new(ym::Cache::default()),
             });
             app.manage(shared.clone());
 
@@ -2255,6 +2347,10 @@ fn main() {
             weather_locate,
             weather_refresh,
             voice,
+            ym_state,
+            ym_set,
+            ym_login,
+            ym_logout,
             clip_read_text,
             paste_text,
             notes_load,

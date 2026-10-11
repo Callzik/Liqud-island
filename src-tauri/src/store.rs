@@ -118,6 +118,8 @@ pub struct Settings {
     /// «Жильцы»: little creatures living at the island (ids of the chosen ones).
     pub residents_enabled: bool,
     pub residents: Vec<String>,
+    /// Yandex Music OAuth token (like / dislike), kept only in this file.
+    pub ym_token: String,
 }
 
 impl Default for Settings {
@@ -151,6 +153,7 @@ impl Default for Settings {
             notes_enabled: true,
             residents_enabled: true,
             residents: vec!["jelly".into(), "cat".into(), "ghost".into()],
+            ym_token: String::new(),
         }
     }
 }

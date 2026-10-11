@@ -95,6 +95,25 @@ export const IVideo = (p: P) => (
     <path d="m15.5 10.5 5-3v9l-5-3" />
   </Svg>
 );
+export const IHeart = ({ filled, ...p }: P & { filled?: boolean }) => (
+  <Svg {...p}>
+    <path
+      d="M12 19.5s-7.5-4.3-7.5-9.6A4.1 4.1 0 0 1 12 7.3a4.1 4.1 0 0 1 7.5 2.6c0 5.3-7.5 9.6-7.5 9.6z"
+      fill={filled ? "currentColor" : "none"}
+    />
+  </Svg>
+);
+export const IHeartOff = ({ filled, ...p }: P & { filled?: boolean }) => (
+  <Svg {...p}>
+    <path
+      d="M12 19.5s-7.5-4.3-7.5-9.6A4.1 4.1 0 0 1 12 7.3a4.1 4.1 0 0 1 7.5 2.6c0 5.3-7.5 9.6-7.5 9.6z"
+      fill={filled ? "currentColor" : "none"}
+      opacity={filled ? 0.9 : 1}
+    />
+    <path d="M4 4.5 20 20.5" strokeWidth={2.2} stroke={filled ? "var(--card, #121214)" : "currentColor"} />
+    <path d="M4 4.5 20 20.5" />
+  </Svg>
+);
 export const IClipboard = (p: P) => (
   <Svg {...p}>
     <rect x="5" y="4.5" width="14" height="16" rx="2.5" />

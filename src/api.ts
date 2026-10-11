@@ -36,6 +36,7 @@ export interface Settings {
   notesEnabled: boolean;
   residentsEnabled: boolean;
   residents: string[];
+  ymToken: string;
 }
 
 export interface ShelfItem {

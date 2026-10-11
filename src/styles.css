@@ -2897,3 +2897,24 @@ html.is-overlay body {
   color: var(--text);
   background: rgba(255, 77, 77, 0.35);
 }
+
+/* like / dislike (Yandex Music) */
+.ctl-rate {
+  color: var(--muted);
+}
+
+.ctl-rate.on {
+  color: #ff5f7e;
+}
+
+.ctl-rate.on:last-child {
+  color: var(--text);
+}
+
+.ctl-rate:active svg {
+  transform: scale(0.85);
+}
+
+.ctl-rate svg {
+  transition: transform 0.15s var(--ease);
+}

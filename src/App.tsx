@@ -447,6 +447,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<boolean>("suppressed", setSuppressed));
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(on<WeatherPayload>("weather", setWeather));
+    subs.push(on<Settings>("settings", setSettings));
     subs.push(on<VoiceState>("voice", setVoice));
     subs.push(on<RecordingState>("recording", setRec));
     subs.push(on<DownloadProgress | null>("download", setDownload));
