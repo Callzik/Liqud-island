@@ -122,6 +122,8 @@ pub struct Settings {
     pub ym_token: String,
     /// Look of the island: "black" (solid) or "glass" (frosted, see-through).
     pub theme: String,
+    /// YouTube Data API key for «Без цензуры» (optional; without it the search page opens).
+    pub yt_key: String,
 }
 
 impl Default for Settings {
@@ -157,6 +159,7 @@ impl Default for Settings {
             residents: vec!["jelly".into(), "cat".into(), "ghost".into()],
             ym_token: String::new(),
             theme: "black".into(),
+            yt_key: String::new(),
         }
     }
 }

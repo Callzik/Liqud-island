@@ -148,6 +148,9 @@ impl Media {
             "toggle" => {
                 s.TryTogglePlayPauseAsync()?.join()?;
             }
+            "pause" => {
+                s.TryPauseAsync()?.join()?;
+            }
             "next" => {
                 s.TrySkipNextAsync()?.join()?;
             }

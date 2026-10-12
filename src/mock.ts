@@ -53,6 +53,7 @@ const state = {
     residents: ["jelly", "cat", "ghost"],
     ymToken: "demo",
     theme: "black",
+    ytKey: "",
   },
   data: {
     shelf: [
@@ -259,6 +260,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       else w.__ym = { liked: false, disliked: args.on };
       return r(null);
     }
+    case "uncensored":
+      return r(false);
     case "audio_devices":
       return r([
         { id: "a", name: "Динамики (Realtek(R) Audio)", default: state.volume.device === "Динамики" },

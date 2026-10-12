@@ -10,6 +10,7 @@ mod store;
 mod voice;
 mod weather;
 mod ym;
+mod yt;
 
 use std::collections::HashMap;
 use std::fs;
@@ -2107,6 +2108,46 @@ async fn ym_lyrics(state: St<'_>, artist: String, title: String, duration_ms: Op
     ym::lyrics(&shared.ym, &token, &artist, &title, duration_ms.unwrap_or(0)).await
 }
 
+/// «Без цензуры»: pauses the current player and plays the same track on
+/// YouTube Music in a player window (its own WebView2 profile: the user signs in
+/// to YouTube once, autoplay is allowed there).
+#[tauri::command]
+async fn uncensored(app: AppHandle, state: St<'_>, artist: String, title: String, duration_ms: Option<i64>) -> Result<bool, String> {
+    let shared = state.inner().clone();
+    let key = lock(&shared.settings).yt_key.clone();
+    let found = if key.trim().is_empty() {
+        None
+    } else {
+        yt::find(key.trim(), &artist, &title, duration_ms.unwrap_or(0)).await?
+    };
+    let url = match &found {
+        Some(id) => yt::watch_url(id),
+        None => yt::search_url(&artist, &title),
+    };
+    let _ = lock(&shared.media_tx).send(MediaCmd {
+        action: "pause".into(),
+        value: 0.0,
+    });
+    let target: tauri::Url = url.parse().map_err(|_| "bad url".to_string())?;
+    if let Some(w) = app.get_webview_window("yt") {
+        w.navigate(target).map_err(|e| e.to_string())?;
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(found.is_some());
+    }
+    let dir = shared.paths.dir.join("youtube-webview");
+    WebviewWindowBuilder::new(&app, "yt", WebviewUrl::External(target))
+        .title("Island — без цензуры")
+        .inner_size(980.0, 640.0)
+        .center()
+        .data_directory(dir)
+        .additional_browser_args("--autoplay-policy=no-user-gesture-required")
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(found.is_some())
+}
+
 fn save_ym_token(app: &AppHandle, token: String) {
     let shared = app.state::<Arc<Shared>>().inner().clone();
     let next = {
@@ -2489,6 +2530,7 @@ fn main() {
             ym_logout,
             ym_set_token,
             ym_lyrics,
+            uncensored,
             clip_read_text,
             paste_text,
             notes_load,

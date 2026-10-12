@@ -450,6 +450,25 @@ export function SettingsTab({
           </div>
         )}
 
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">«Без цензуры» — ключ YouTube</div>
+            <div className="setting-sub">
+              Необязательно. С ключом трек находится и включается сам, без ключа открывается поиск.{" "}
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  call("open_target", { target: "https://console.cloud.google.com/apis/library/youtube.googleapis.com", count: false });
+                }}
+              >
+                Получить ключ YouTube Data API
+              </a>
+            </div>
+          </div>
+          <TextField value={settings.ytKey} onSave={(v) => set("ytKey", v)} setBusy={setBusy} placeholder="AIza…" secret />
+        </div>
+
         <div className="settings-section">Жильцы</div>
         <div className="setting">
           <div>

@@ -101,7 +101,30 @@ function MediaCard({
     <div className="card media-card">
       <Cover url={cover} size={128} radius={18} />
       <div className="media-info">
-        <div className="media-app">{media.app}</div>
+        <div className="media-app">
+          {media.app}
+          {ymPlayer && (
+            <button
+              className="uncensored"
+              title="Включить этот трек на YouTube Music — оригинальная версия, без вырезанных слов"
+              onClick={async () => {
+                try {
+                  const exact = await call<boolean>("uncensored", { artist: media.artist, title: media.title, durationMs: media.durationMs });
+                  toast(
+                    exact
+                      ? { icon: "check", title: "Включаю на YouTube Music", subtitle: media.title }
+                      : { icon: "check", title: "Открыл поиск на YouTube Music", subtitle: "Выберите трек — для автопоиска добавьте ключ YouTube в настройках" },
+                    3500,
+                  );
+                } catch (e) {
+                  toast({ icon: "error", tone: "error", title: "Не получилось", subtitle: String(e) }, 3500);
+                }
+              }}
+            >
+              E · без цензуры
+            </button>
+          )}
+        </div>
         <div className="media-title" title={media.title}>
           {media.title}
         </div>

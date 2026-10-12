@@ -38,6 +38,7 @@ export interface Settings {
   residents: string[];
   ymToken: string;
   theme: "black" | "glass";
+  ytKey: string;
 }
 
 export interface ShelfItem {
