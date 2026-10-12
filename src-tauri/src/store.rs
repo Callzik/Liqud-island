@@ -120,6 +120,8 @@ pub struct Settings {
     pub residents: Vec<String>,
     /// Yandex Music OAuth token (like / dislike), kept only in this file.
     pub ym_token: String,
+    /// Look of the island: "black" (solid) or "glass" (frosted, see-through).
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -154,6 +156,7 @@ impl Default for Settings {
             residents_enabled: true,
             residents: vec!["jelly".into(), "cat".into(), "ghost".into()],
             ym_token: String::new(),
+            theme: "black".into(),
         }
     }
 }

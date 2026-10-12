@@ -147,6 +147,11 @@ export default function App({ boot }: { boot: InitPayload }) {
     ghostRef.current = { mode, node: innerRef.current ? innerRef.current.cloneNode(true) : null };
   }
 
+  const glass = settings.theme === "glass";
+  useEffect(() => {
+    liquidRef.current?.setGlass(glass);
+  }, [glass]);
+
   // set during render, so the lyrics key below already knows the source
   setYandexLyrics(!!settings.ymToken);
   const lyrics = useLyrics(media);
@@ -451,6 +456,13 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(on<Settings>("settings", setSettings));
+    subs.push(
+      on<{ x: number; y: number; w: number; h: number; url: string }>("backdrop", (b) => {
+        const img = new Image();
+        img.onload = () => liquidRef.current?.setBackdrop(img, b.x, b.y, b.w, b.h);
+        img.src = b.url;
+      }),
+    );
     subs.push(on<VoiceState>("voice", setVoice));
     subs.push(on<RecordingState>("recording", setRec));
     subs.push(on<DownloadProgress | null>("download", setDownload));
@@ -651,7 +663,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   };
 
   return (
-    <div className={`root ${suppressed ? "is-hidden" : ""}`}>
+    <div className={`root ${suppressed ? "is-hidden" : ""} ${glass ? "theme-glass" : ""}`}>
       <canvas ref={canvasRef} className="liquid" />
       {settings.residentsEnabled && (
         <Residents

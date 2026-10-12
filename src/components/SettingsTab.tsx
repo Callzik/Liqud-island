@@ -275,6 +275,22 @@ export function SettingsTab({
     <div className="settings">
       <div className="settings-grid">
         <div className="settings-section">Основное</div>
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">Оформление</div>
+            <div className="setting-sub">
+              {settings.theme === "glass" ? "Матовое стекло: сквозь остров видно, что под ним" : "Классический чёрный остров"}
+            </div>
+          </div>
+          <div className="seg">
+            <button className={settings.theme === "glass" ? "on" : ""} onClick={() => set("theme", "glass")}>
+              Liquid Glass
+            </button>
+            <button className={settings.theme !== "glass" ? "on" : ""} onClick={() => set("theme", "black")}>
+              Чёрный
+            </button>
+          </div>
+        </div>
         {rows.map((r) => (
           <div className="setting" key={r.key}>
             <div>

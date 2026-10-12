@@ -52,6 +52,7 @@ const state = {
     residentsEnabled: true,
     residents: ["jelly", "cat", "ghost"],
     ymToken: "demo",
+    theme: "black",
   },
   data: {
     shelf: [
@@ -117,6 +118,11 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       return r(Object.fromEntries((args.keys as string[]).map((k) => [k, iconFor(k)])));
     case "save_settings":
       state.settings = args.settings;
+      if (state.settings.theme === "glass") {
+        // a colourful "wallpaper" stands in for the screen behind the island
+        const wall = `<svg xmlns='http://www.w3.org/2000/svg' width='250' height='160'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#ff4fa3'/><stop offset='.5' stop-color='#7a3cff'/><stop offset='1' stop-color='#1fc7ff'/></linearGradient></defs><rect width='250' height='160' fill='url(#g)'/><circle cx='70' cy='60' r='40' fill='#ffd36e'/><rect x='150' y='30' width='70' height='90' rx='12' fill='#ffffff' opacity='.85'/></svg>`;
+        setTimeout(() => mockEmit("backdrop", { x: 0, y: 0, w: 1000, h: 640, url: "data:image/svg+xml;utf8," + encodeURIComponent(wall) }), 50);
+      }
       return r(state.settings);
     case "shelf_add":
       for (const p of args.paths as string[]) {

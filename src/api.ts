@@ -37,6 +37,7 @@ export interface Settings {
   residentsEnabled: boolean;
   residents: string[];
   ymToken: string;
+  theme: "black" | "glass";
 }
 
 export interface ShelfItem {

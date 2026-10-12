@@ -2962,3 +2962,58 @@ html.is-overlay body {
   color: var(--text) !important;
   font-weight: 650;
 }
+
+/* ------------------------------------------------------------ theme switch */
+
+.seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--raised);
+  flex-shrink: 0;
+}
+
+.seg button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.seg button.on {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+}
+
+/* --------------------------------------------------------- Liquid Glass look */
+
+.theme-glass {
+  --card: rgba(255, 255, 255, 0.075);
+  --card-hover: rgba(255, 255, 255, 0.12);
+  --raised: rgba(255, 255, 255, 0.13);
+  --line: rgba(255, 255, 255, 0.12);
+}
+
+.theme-glass .card,
+.theme-glass .action,
+.theme-glass .setting,
+.theme-glass .tt-tool,
+.theme-glass .chat-input,
+.theme-glass .notes-search {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.theme-glass .island {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.theme-glass .device-pop,
+.theme-glass .md-code {
+  background: rgba(20, 20, 26, 0.92);
+}

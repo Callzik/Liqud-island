@@ -1515,6 +1515,91 @@ fn build_overlay(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The island stays out of screenshots / recordings while a recording runs or the
+/// glass look is on (glass reads the screen behind the island — it must not see itself).
+fn keep_out_of_capture(shared: &Shared) -> bool {
+    lock(&shared.recording).is_some() || lock(&shared.settings).theme == "glass"
+}
+
+#[derive(Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct Backdrop {
+    /// area in window (logical) pixels the image covers
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    url: String,
+}
+
+/// Glass look: a small, downscaled copy of the screen behind the island, a few
+/// times a second; the canvas draws it blurred inside the liquid shape.
+fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
+    thread::Builder::new()
+        .name("backdrop".into())
+        .spawn(move || {
+            let mut excluded = false;
+            let mut last_hash = 0u64;
+            loop {
+                let glass = lock(&shared.settings).theme == "glass";
+                let own = shared.own_hwnd.load(Ordering::Relaxed);
+                let want_excluded = glass || lock(&shared.recording).is_some();
+                if want_excluded != excluded && own != 0 {
+                    capture::exclude_from_capture(own, want_excluded);
+                    excluded = want_excluded;
+                }
+                if !glass || shared.suppressed.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(400));
+                    continue;
+                }
+                thread::sleep(Duration::from_millis(140));
+                let geom = *lock(&shared.geom);
+                let hit = *lock(&shared.hit);
+                if geom.scale <= 0.0 || hit.w <= 0.0 {
+                    continue;
+                }
+                // a margin around the island: the spring animation overshoots it
+                let x = (hit.x - 40.0).max(0.0);
+                let y = 0.0;
+                let w = (hit.w + 80.0).min(WIN_W - x);
+                let h = (hit.h + 70.0).min(WIN_H);
+                let (px, py) = (geom.x + (x * geom.scale) as i32, geom.y + (y * geom.scale) as i32);
+                let (pw, ph) = ((w * geom.scale) as u32, (h * geom.scale) as u32);
+                if pw < 4 || ph < 4 {
+                    continue;
+                }
+                let Some(bgra) = capture::grab(px, py, pw, ph) else { continue };
+                let rgba = capture::bgra_to_rgba(&bgra);
+                // it gets blurred anyway: a quarter-size image is plenty
+                let (sw, sh, small) = img::shrink(pw, ph, &rgba, 240);
+                let hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hs = std::collections::hash_map::DefaultHasher::new();
+                    small.hash(&mut hs);
+                    (x as i64, w as i64, h as i64).hash(&mut hs);
+                    hs.finish()
+                };
+                if hash == last_hash {
+                    continue;
+                }
+                last_hash = hash;
+                let Some(png) = img::encode_png(sw, sh, &small) else { continue };
+                let _ = app.emit_to(
+                    EventTarget::webview_window("main"),
+                    "backdrop",
+                    Backdrop {
+                        x,
+                        y,
+                        w,
+                        h,
+                        url: util::data_url("image/png", &png),
+                    },
+                );
+            }
+        })
+        .expect("failed to start backdrop thread");
+}
+
 /// Takes a snapshot of the monitor under the cursor (without our own windows).
 fn snapshot(shared: &Shared, mode: &str) -> Option<Shot> {
     let own = shared.own_hwnd.load(Ordering::Relaxed);
@@ -1523,9 +1608,8 @@ fn snapshot(shared: &Shared, mode: &str) -> Option<Shot> {
     capture::exclude_from_capture(own, true);
     thread::sleep(Duration::from_millis(60));
     let px = capture::grab(x, y, w, h);
-    // a recording in progress keeps the island (red dot, timer) out of the video
-    let recording = lock(&shared.recording).is_some();
-    capture::exclude_from_capture(own, recording);
+    // a recording / the glass look keep the island out of captures
+    capture::exclude_from_capture(own, keep_out_of_capture(shared));
     let bgra = Arc::new(px?);
     let bmp = Arc::new(capture::bmp(&bgra, w, h));
     Some(Shot {
@@ -1723,7 +1807,7 @@ fn start_recording(app: &AppHandle, shared: &Arc<Shared>, shot: &Shot, rect: Opt
             recording_state(app, true, store::now_ms());
         }
         Err(e) => {
-            capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), false);
+            capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), keep_out_of_capture(shared));
             toast_error(app, "Не удалось начать запись", &e);
         }
     }
@@ -1738,7 +1822,7 @@ async fn record_stop(app: AppHandle, state: St<'_>) -> Result<(), String> {
     let result = tauri::async_runtime::spawn_blocking(move || rec.finish())
         .await
         .map_err(|e| e.to_string())?;
-    capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), false);
+    capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), keep_out_of_capture(&shared));
     match result {
         Ok(path) => {
             let name = store::file_name(&path.to_string_lossy());
@@ -2350,6 +2434,7 @@ fn main() {
             spawn_weather_thread(app.handle().clone(), shared.clone(), weather_rx);
             spawn_voice_thread(app.handle().clone(), shared.clone(), voice_rx);
             spawn_downloads_thread(app.handle().clone(), shared.clone());
+            spawn_backdrop_thread(app.handle().clone(), shared.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

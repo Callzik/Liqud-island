@@ -75,6 +75,9 @@ export class Liquid {
   private rim: [number, number, number, number] = [255, 255, 255, 0.12];
   private rimTarget: [number, number, number, number] = [255, 255, 255, 0.12];
   private shadow = new Spring(0, 80, 18);
+  /** glass look: the screen behind the island, blurred inside the shape */
+  private glass = false;
+  private backdrop: { img: HTMLImageElement; x: number; y: number; w: number; h: number } | null = null;
   private springs = [this.w, this.h, this.r, this.pull, this.pullX, this.wave, this.bars, this.shadow];
 
   private level = 0;
@@ -152,6 +155,41 @@ export class Liquid {
   clearCursor() {
     this.cursor = null;
     this.kick();
+  }
+
+  setGlass(on: boolean) {
+    if (this.glass === on) return;
+    this.glass = on;
+    if (!on) this.backdrop = null;
+    this.kick();
+  }
+
+  setBackdrop(img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+    if (!this.glass) return;
+    this.backdrop = { img, x, y, w, h };
+    this.kick();
+  }
+
+  /** Frosted glass inside the current path (called with the shape as clip). */
+  private paintGlass(ctx: CanvasRenderingContext2D, L: number, R: number, H: number) {
+    const b = this.backdrop;
+    if (b) {
+      ctx.save();
+      ctx.filter = "blur(14px) saturate(170%)";
+      // bleed past the edges so the blur doesn't fade to transparent at the border
+      ctx.drawImage(b.img, b.x - 24, b.y - 24, b.w + 48, b.h + 48);
+      ctx.restore();
+    }
+    // tint keeps text readable on any wallpaper
+    ctx.fillStyle = "rgba(14,14,18,0.46)";
+    ctx.fillRect(L - 2, 0, R - L + 4, H + 2);
+    // soft sheen from above
+    const g = ctx.createLinearGradient(0, 0, 0, Math.max(30, H));
+    g.addColorStop(0, "rgba(255,255,255,0.16)");
+    g.addColorStop(0.45, "rgba(255,255,255,0.04)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(L - 2, 0, R - L + 4, H + 2);
   }
 
   setAudio(level: number) {
@@ -341,9 +379,22 @@ export class Liquid {
       ctx.shadowOffsetY = 8 * this.shadow.value;
     }
     this.shapePath(ctx, L, R, H, rr, f);
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = this.glass ? "rgba(0,0,0,0.22)" : "#000";
     ctx.fill();
     ctx.restore();
+
+    if (this.glass) {
+      ctx.save();
+      this.shapePath(ctx, L, R, H, rr, f);
+      ctx.clip();
+      this.paintGlass(ctx, L, R, H);
+      // thin light edge (inside the clip, so only the inner half shows)
+      this.shapePath(ctx, L, R, H, rr, f);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // rim along the bottom edge, inside the shape
     const [cr, cg, cb, ca] = this.rim;
@@ -384,7 +435,7 @@ export class Liquid {
     for (const d of this.drops) {
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, d.life * 1.5));
-      ctx.fillStyle = "#000";
+      ctx.fillStyle = this.glass ? "rgba(30,30,36,0.55)" : "#000";
       ctx.beginPath();
       ctx.ellipse(d.x, d.y, d.r * 0.9, d.r * (1 + Math.min(0.5, d.vy / 1600)), 0, 0, Math.PI * 2);
       ctx.fill();
