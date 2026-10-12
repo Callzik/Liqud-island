@@ -1,9 +1,29 @@
-import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore, type CSSProperties } from "react";
+import { getOffset, offsetKey, setOffset, subscribeOffsets } from "../lib/lyricOffset";
 import { call } from "../api";
 import { css } from "../lib/color";
 import { useLyricSync } from "../lib/useLyrics";
 import type { PanelProps } from "./Panel";
 import { LyricWords } from "./Compact";
+
+/** «Раньше / позже»: nudges the whole text of this track, remembered per track. */
+function OffsetControl({ track }: { track: string }) {
+  const off = useSyncExternalStore(subscribeOffsets, () => getOffset(track));
+  const fmt = (ms: number) => `${ms > 0 ? "+" : ms < 0 ? "−" : ""}${(Math.abs(ms) / 1000).toFixed(1).replace(".", ",")} с`;
+  return (
+    <div className="ly-offset" onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => setOffset(track, off - 200)} title="Подсветка раньше времени — сдвинуть позже">
+        Позже
+      </button>
+      <button className={`ly-offset-v ${off ? "on" : ""}`} onClick={() => setOffset(track, 0)} title={off ? "Сбросить сдвиг" : "Сдвиг текста для этого трека"}>
+        {off ? fmt(off) : "0 с"}
+      </button>
+      <button onClick={() => setOffset(track, off + 200)} title="Подсветка опаздывает — сдвинуть раньше">
+        Раньше
+      </button>
+    </div>
+  );
+}
 
 export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "media" | "mediaAt" | "accent" | "lyrics">) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -107,6 +127,7 @@ export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "med
           );
         })}
       </div>
+      {media && <OffsetControl track={offsetKey(media.artist, media.title)} />}
       <div className="ly-credit">LRCLIB</div>
     </div>
   );

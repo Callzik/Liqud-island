@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "../api";
 import { fetchLyrics, lyricsKey, type LyricLine, type LyricsData } from "./lyrics";
 import { runLyricSync, playbackState } from "./lyricSync";
+import { getOffset, offsetKey } from "./lyricOffset";
 
 export interface LyricsState {
   status: "idle" | "loading" | "ok" | "none";
@@ -73,7 +74,12 @@ export function useLyricSync(
     if (!lines) return;
     return runLyricSync(
       lines,
-      () => playbackState(mref.current, aref.current),
+      () => {
+        const m = mref.current;
+        const st = playbackState(m, aref.current);
+        // the user's per-track nudge: positive = highlight earlier
+        return st && m ? { ...st, pos: st.pos + getOffset(offsetKey(m.artist, m.title)) } : st;
+      },
       setIdx,
       (i) => eref.current(i),
       sref.current ? (el, x) => sref.current?.(el, x) : undefined,

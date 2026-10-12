@@ -78,27 +78,61 @@ function pick(items: Item[], durationMs: number): Item | null {
   return best;
 }
 
+/** Rough singing weight of a word: syllables (vowel groups) plus a pause after punctuation. */
+function weight(w: string): number {
+  const syl = (w.toLowerCase().match(/[aeiouyаеёиоуыэюя]+/g) ?? []).length;
+  const pause = /[,;:—–-]$/.test(w) ? 0.8 : /[.!?…]$/.test(w) ? 1.2 : 0;
+  return Math.max(1, syl) + 0.35 + pause;
+}
+
 function makeWords(text: string, span: number): LyricWord[] {
   const parts = text.split(/\s+/).filter(Boolean);
-  const weights = parts.map((p) => p.length + 1.5);
+  const weights = parts.map(weight);
   const sum = weights.reduce((a, b) => a + b, 0) || 1;
   let acc = 0;
   return parts.map((p, i) => {
     const from = (acc / sum) * span;
     acc += weights[i];
-    return { text: p, from, to: (acc / sum) * span };
+    // a word's own pause is silence, not singing: the highlight finishes before it
+    const pause = weights[i] - Math.max(1, (p.toLowerCase().match(/[aeiouyаеёиоуыэюя]+/g) ?? []).length) - 0.35;
+    return { text: p, from, to: ((acc - Math.max(0, pause)) / sum) * span };
   });
 }
 
+const TAG = /<(\d+):(\d+)(?:[.:](\d+))?>/g;
+const tagMs = (m: RegExpMatchArray) => Math.round((Number(m[1]) * 60 + Number(m[2]) + (m[3] ? Number(`0.${m[3]}`) : 0)) * 1000);
+
+/** Enhanced LRC: "<00:12.30>word <00:12.80>word" — exact word times when the file has them. */
+function taggedWords(body: string, lineT: number, end: number): { text: string; words: LyricWord[] } | null {
+  const marks = [...body.matchAll(TAG)];
+  if (marks.length < 2) return null;
+  const words: LyricWord[] = [];
+  marks.forEach((m, k) => {
+    const start = m.index! + m[0].length;
+    const stop = k + 1 < marks.length ? marks[k + 1].index! : body.length;
+    const chunk = body.slice(start, stop).trim();
+    if (!chunk) return;
+    const from = tagMs(m) - lineT;
+    const to = (k + 1 < marks.length ? tagMs(marks[k + 1]) : Math.min(end, tagMs(m) + 600)) - lineT;
+    // a tag may cover several words: split its time evenly
+    const parts = chunk.split(/\s+/);
+    parts.forEach((p, j) => {
+      const a = from + ((to - from) * j) / parts.length;
+      words.push({ text: p, from: a, to: a + (to - from) / parts.length });
+    });
+  });
+  return words.length ? { text: words.map((w) => w.text).join(" "), words } : null;
+}
+
 export function parseLrc(src: string): LyricLine[] {
-  const raw: { t: number; text: string }[] = [];
+  const raw: { t: number; text: string; body: string }[] = [];
   for (const row of src.split(/\r?\n/)) {
     const m = row.match(/^((?:\[\d+:\d+(?:[.:]\d+)?\])+)(.*)$/);
     if (!m) continue;
-    const text = m[2].replace(/<\d+:\d+(?:[.:]\d+)?>/g, "").trim();
+    const text = m[2].replace(TAG, "").replace(/\s+/g, " ").trim();
     for (const s of m[1].matchAll(/\[(\d+):(\d+)(?:[.:](\d+))?\]/g)) {
       const frac = s[3] ? Number(`0.${s[3]}`) : 0;
-      raw.push({ t: Math.round((Number(s[1]) * 60 + Number(s[2]) + frac) * 1000), text });
+      raw.push({ t: Math.round((Number(s[1]) * 60 + Number(s[2]) + frac) * 1000), text, body: m[2] });
     }
   }
   raw.sort((a, b) => a.t - b.t);
@@ -106,7 +140,14 @@ export function parseLrc(src: string): LyricLine[] {
   raw.forEach((r, i) => {
     if (!r.text) return;
     const end = i + 1 < raw.length ? raw[i + 1].t : r.t + 5000;
-    const span = Math.max(400, Math.min(end - r.t - 120, r.text.length * 105 + 500));
+    const exact = taggedWords(r.body, r.t, end);
+    if (exact) {
+      out.push({ t: r.t, text: exact.text, words: exact.words });
+      return;
+    }
+    // ~4.5 syllables per second when sung, never past the next line
+    const syl = r.text.split(/\s+/).reduce((n, w) => n + weight(w), 0);
+    const span = Math.max(400, Math.min(end - r.t - 150, syl * 230 + 300));
     out.push({ t: r.t, text: r.text, words: makeWords(r.text, span) });
   });
   return out;

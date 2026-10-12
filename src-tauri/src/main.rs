@@ -527,7 +527,9 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
             let mut cover_id = 0u32;
             let mut has_cover = false;
             loop {
-                match rx.recv_timeout(Duration::from_millis(700)) {
+                // while music plays the position is re-read more often: lyrics follow it
+                let poll = if shared.media_playing.load(Ordering::Relaxed) { 300 } else { 700 };
+                match rx.recv_timeout(Duration::from_millis(poll)) {
                     Ok(cmd) => {
                         let _ = media.control(&cmd.action, cmd.value);
                         // quick clicks (next, next, next) go out together, then

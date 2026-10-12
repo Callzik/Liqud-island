@@ -21,7 +21,10 @@ export function playbackPos(m: Media | null, mediaAt: number): number | null {
 export function playbackState(m: Media | null, mediaAt: number): PlaybackState | null {
   if (!m) return null;
   const now = Date.now();
-  const base = m.updatedMs > 0 && Math.abs(now - m.updatedMs) < 6 * 3600e3 ? m.updatedMs : mediaAt;
+  // the player's own sample time when it is sane; a time in the future or a
+  // stale stamp for a paused-then-resumed track falls back to when we got it
+  const sane = m.updatedMs > 0 && m.updatedMs <= now + 1000 && now - m.updatedMs < 6 * 3600e3;
+  const base = sane ? Math.min(m.updatedMs, now) : mediaAt;
   return { pos: m.positionMs + (m.playing ? Math.max(0, now - base) : 0), playing: m.playing };
 }
 
