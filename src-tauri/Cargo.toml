@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.3.8"
+version = "0.3.9"
 description = "Liquid Dynamic Island for Windows 10/11"
 authors = ["Callzik"]
 edition = "2021"
@@ -19,6 +19,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 png = "0.17"
 rqrr = "0.11"
+# signing Yandex Music lyrics requests
+hmac = "0.12"
+sha2 = "0.10"
 # HTTP for the AI chat / weather: Windows' own TLS (schannel), no C toolchain needed
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json", "multipart", "charset"] }
 pdf-extract = "0.12"

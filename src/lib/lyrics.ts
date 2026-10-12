@@ -1,3 +1,4 @@
+import { call, isTauri } from "../api";
 // Synced lyrics from LRCLIB (https://lrclib.net) — fetched at runtime, never bundled.
 // LRCLIB gives a timestamp per line; word timing inside a line is estimated
 // from word lengths so the highlight can sweep through the line.
@@ -30,6 +31,7 @@ export interface LyricsQuery {
 }
 
 interface Item {
+  artistName?: string;
   duration?: number | null;
   instrumental?: boolean;
   plainLyrics?: string | null;
@@ -39,7 +41,14 @@ interface Item {
 const BASE = "https://lrclib.net/api";
 const cache = new Map<string, LyricsData | null>();
 
-export const lyricsKey = (q: LyricsQuery) => `${q.artist}\u0001${q.title}\u0001${q.album}\u0001${Math.round(q.durationMs / 1000)}`;
+/** Yandex Music as the first source (when the account is connected in settings). */
+let yandexOn = false;
+export function setYandexLyrics(on: boolean) {
+  yandexOn = on;
+}
+
+export const lyricsKey = (q: LyricsQuery) =>
+  `${q.artist}\u0001${q.title}\u0001${q.album}\u0001${Math.round(q.durationMs / 1000)}\u0001${yandexOn ? "ym" : ""}`;
 
 /** "Song (feat. X) - 2011 Remaster" → "Song" */
 function cleanTitle(s: string): string {
@@ -47,6 +56,21 @@ function cleanTitle(s: string): string {
     .replace(/\s*[(\[][^)\]]*(feat|ft\.|remaster|live|version|edit|mono|stereo|deluxe|bonus)[^)\]]*[)\]]/gi, "")
     .replace(/\s+-\s+(\d{4}\s+)?(remaster|live|single|radio|mono|stereo).*$/i, "")
     .trim();
+}
+
+/** "Song (Remix) [Live]" → "Song"; ё → е — for a last-chance search. */
+function bareTitle(s: string): string {
+  return s.replace(/\s*[(\[][^)\]]*[)\]]/g, "").replace(/\s+-\s+.*$/, "").trim();
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/ё/g, "е").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/** Does an LRCLIB entry belong to (one of) the artists we're playing? */
+function sameArtist(a: string | undefined, ours: string): boolean {
+  if (!a) return false;
+  const x = norm(a);
+  const parts = ours.split(/\s*(?:,|;|&|\/|\bfeat\.?|\bft\.?|\sх\s|\sx\s)\s*/i).map(norm).filter(Boolean);
+  return parts.some((p) => x.includes(p) || p.includes(x));
 }
 
 function firstArtist(s: string): string {
@@ -192,8 +216,31 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
 
   const title = cleanTitle(q.title) || q.title;
   const artist = firstArtist(q.artist) || q.artist;
+  const bare = bareTitle(q.title) || title;
+  const titles = [...new Set([q.title, title, bare, bare.replace(/ё/gi, (m) => (m === "Ё" ? "Е" : "е"))])];
 
-  // all lookups run at the same time — the first useful answer wins
+  // 1) Yandex Music: synced lyrics there cover many Russian tracks LRCLIB lacks
+  let ymPlain: Item | null = null;
+  if (yandexOn && isTauri) {
+    const ym = await Promise.race([
+      call<{ synced?: string | null; plain?: string | null } | null>("ym_lyrics", {
+        artist: q.artist,
+        title: q.title,
+        durationMs: q.durationMs,
+      }).catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), 6000)),
+    ]);
+    if (ym?.synced) {
+      const data = toData({ syncedLyrics: ym.synced, plainLyrics: ym.plain ?? null });
+      if (data.lines) {
+        cache.set(key, data);
+        return data;
+      }
+    }
+    if (ym?.plain) ymPlain = { plainLyrics: ym.plain };
+  }
+
+  // 2) LRCLIB: every lookup runs at the same time — the first synced answer wins
   const tasks: Promise<Item | null>[] = [];
   if (q.album && q.durationMs > 0) {
     const p = new URLSearchParams({
@@ -204,10 +251,14 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
     });
     tasks.push(getJson(`${BASE}/get?${p}`, signal).then((it) => (useful(it as Item) ? (it as Item) : null)));
   }
-  const search = (p: URLSearchParams) =>
-    getJson(`${BASE}/search?${p}`, signal).then((l) => (Array.isArray(l) ? pick(l as Item[], q.durationMs) : null));
-  tasks.push(search(new URLSearchParams({ track_name: title, artist_name: artist })));
+  const search = (p: URLSearchParams, strictArtist = false) =>
+    getJson(`${BASE}/search?${p}`, signal).then((l) =>
+      Array.isArray(l) ? pick((l as Item[]).filter((it) => !strictArtist || sameArtist(it.artistName, q.artist)), q.durationMs) : null,
+    );
+  for (const t of titles.slice(0, 3)) tasks.push(search(new URLSearchParams({ track_name: t, artist_name: artist })));
   tasks.push(search(new URLSearchParams({ q: `${artist} ${title}` })));
+  // spelling of the artist differs (латиница / кириллица): search by title, check the artist ourselves
+  tasks.push(search(new URLSearchParams({ track_name: bare }), true));
 
   // a failed request (offline at startup, 429/5xx) must not be remembered as
   // "this song has no lyrics" — only a clean "not found" is
@@ -223,7 +274,9 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
   // timed out waiting for a synced version: plain text found so far still counts
   if (signal.aborted && !found) throw new DOMException("aborted", "AbortError");
 
-  const data = found ? toData(found) : null;
+  // LRCLIB plain text vs Yandex plain text: either is better than nothing
+  const best = found ?? ymPlain;
+  const data = best ? toData(best) : null;
   if (data || !failed) {
     cache.set(key, data);
     if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);

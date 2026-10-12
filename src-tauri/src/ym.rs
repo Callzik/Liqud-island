@@ -180,3 +180,66 @@ pub async fn set(cache: &Shared, token: &str, track_id: &str, kind: &str, on: bo
     let _ = library(cache, token, u, "dislikes", true).await;
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Lyrics (synced LRC when Yandex has it, otherwise plain text)
+// ---------------------------------------------------------------------------
+
+/// Signing key of the Android client for `/tracks/{id}/lyrics`.
+const SIGN_KEY: &[u8] = b"p93jhgh689SBReK6ghtw62";
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Lyrics {
+    pub synced: Option<String>,
+    pub plain: Option<String>,
+}
+
+fn sign(track_id: &str) -> (i64, String) {
+    use hmac::{Hmac, Mac};
+    let id: String = track_id.split(':').next().unwrap_or(track_id).to_string();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut mac = <Hmac<sha2::Sha256> as Mac>::new_from_slice(SIGN_KEY).expect("hmac key");
+    mac.update(format!("{id}{ts}").as_bytes());
+    (ts, crate::native::util::base64(&mac.finalize().into_bytes()))
+}
+
+async fn lyrics_of(token: &str, track_id: &str, format: &str) -> Result<Option<String>, String> {
+    let (ts, sig) = sign(track_id);
+    let id = track_id.split(':').next().unwrap_or(track_id);
+    let req = get(token, &format!("/tracks/{id}/lyrics")).query(&[
+        ("format", format.to_string()),
+        ("timeStamp", ts.to_string()),
+        ("sign", sig),
+    ]);
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Ok(None); // 404 / 400: no lyrics of this kind
+    }
+    let v: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let Some(url) = v["result"]["downloadUrl"].as_str() else { return Ok(None) };
+    let text = crate::ai::client()
+        .get(url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok((!text.trim().is_empty()).then_some(text))
+}
+
+/// Lyrics of the track as Yandex Music has them (needs the user's token).
+pub async fn lyrics(cache: &Shared, token: &str, artist: &str, title: &str, duration_ms: i64) -> Result<Option<Lyrics>, String> {
+    if token.is_empty() || title.is_empty() {
+        return Ok(None);
+    }
+    let Some(id) = find(cache, token, artist, title, duration_ms).await? else { return Ok(None) };
+    let synced = lyrics_of(token, &id, "LRC").await.unwrap_or(None);
+    let plain = if synced.is_none() { lyrics_of(token, &id, "TEXT").await.unwrap_or(None) } else { None };
+    Ok((synced.is_some() || plain.is_some()).then_some(Lyrics { synced, plain }))
+}

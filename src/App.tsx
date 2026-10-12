@@ -24,6 +24,7 @@ import { DropZones, type DropZone } from "./components/DropZones";
 import { Panel, type Tab } from "./components/Panel";
 import { Launcher } from "./components/Launcher";
 import { useLyrics } from "./lib/useLyrics";
+import { setYandexLyrics } from "./lib/lyrics";
 import { rainSoon, sky, deg, type WeatherPayload } from "./lib/weather";
 import { WeatherCompact } from "./components/Weather";
 import { VoicePill, type VoiceState } from "./components/VoicePill";
@@ -146,6 +147,8 @@ export default function App({ boot }: { boot: InitPayload }) {
     ghostRef.current = { mode, node: innerRef.current ? innerRef.current.cloneNode(true) : null };
   }
 
+  // set during render, so the lyrics key below already knows the source
+  setYandexLyrics(!!settings.ymToken);
   const lyrics = useLyrics(media);
   const lyricsInIsland = mode === "music" && !!lyrics.lines;
 

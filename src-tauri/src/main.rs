@@ -2015,6 +2015,14 @@ async fn ym_set(state: St<'_>, track_id: String, kind: String, on: bool) -> Resu
     Ok(())
 }
 
+/// Lyrics from Yandex Music (first source when the account is connected).
+#[tauri::command]
+async fn ym_lyrics(state: St<'_>, artist: String, title: String, duration_ms: Option<i64>) -> Result<Option<ym::Lyrics>, String> {
+    let shared = state.inner().clone();
+    let token = lock(&shared.settings).ym_token.clone();
+    ym::lyrics(&shared.ym, &token, &artist, &title, duration_ms.unwrap_or(0)).await
+}
+
 fn save_ym_token(app: &AppHandle, token: String) {
     let shared = app.state::<Arc<Shared>>().inner().clone();
     let next = {
@@ -2395,6 +2403,7 @@ fn main() {
             ym_login,
             ym_logout,
             ym_set_token,
+            ym_lyrics,
             clip_read_text,
             paste_text,
             notes_load,
