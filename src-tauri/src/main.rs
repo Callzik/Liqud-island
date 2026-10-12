@@ -2026,46 +2026,87 @@ fn save_ym_token(app: &AppHandle, token: String) {
     let _ = app.emit("settings", next);
 }
 
+fn ym_connected(h: &AppHandle) {
+    if let Some(w) = h.get_webview_window("ymlogin") {
+        let _ = w.close();
+    }
+    toast(
+        h,
+        ToastPayload {
+            icon: "check".into(),
+            title: "Яндекс Музыка подключена".into(),
+            subtitle: Some("Лайки и дизлайки — на главной".into()),
+            ms: Some(3000),
+            ..Default::default()
+        },
+    );
+}
+
 /// Opens the Yandex login page; the token is taken from the redirect URL.
+/// Async on purpose: a window built inside a synchronous command (main thread)
+/// stays blank on Windows — WebView2 can't finish while that thread is busy.
 #[tauri::command]
-fn ym_login(app: AppHandle) -> Result<(), String> {
+async fn ym_login(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("ymlogin") {
+        let _ = w.show();
         let _ = w.set_focus();
         return Ok(());
     }
     let url: tauri::Url = ym::LOGIN_URL.parse().map_err(|_| "bad login url".to_string())?;
-    let handle = app.clone();
-    WebviewWindowBuilder::new(&app, "ymlogin", WebviewUrl::External(url))
+    let done = Arc::new(AtomicBool::new(false));
+    let (handle, flag) = (app.clone(), done.clone());
+    let win = WebviewWindowBuilder::new(&app, "ymlogin", WebviewUrl::External(url))
         .title("Вход в Яндекс Музыку")
-        .inner_size(480.0, 680.0)
+        .inner_size(480.0, 700.0)
         .center()
+        .focused(true)
         .on_navigation(move |u| {
             if let Some(token) = ym::token_from_url(u.as_str()) {
-                save_ym_token(&handle, token);
-                let h = handle.clone();
-                // close after the navigation callback has returned
-                thread::spawn(move || {
-                    thread::sleep(Duration::from_millis(150));
-                    if let Some(w) = h.get_webview_window("ymlogin") {
-                        let _ = w.close();
-                    }
-                    toast(
-                        &h,
-                        ToastPayload {
-                            icon: "check".into(),
-                            title: "Яндекс Музыка подключена".into(),
-                            subtitle: Some("Лайки и дизлайки — на главной".into()),
-                            ms: Some(3000),
-                            ..Default::default()
-                        },
-                    );
-                });
+                if !flag.swap(true, Ordering::Relaxed) {
+                    save_ym_token(&handle, token);
+                    let h = handle.clone();
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_millis(150));
+                        ym_connected(&h);
+                    });
+                }
                 return false;
             }
             true
         })
         .build()
         .map_err(|e| e.to_string())?;
+    // fallback: the token can also arrive as a fragment change, which is not a
+    // navigation — watch the address of the page while the window is open
+    let h = app.clone();
+    thread::spawn(move || {
+        for _ in 0..1200 {
+            thread::sleep(Duration::from_millis(500));
+            if done.load(Ordering::Relaxed) {
+                return;
+            }
+            let Ok(u) = win.url() else { return };
+            if let Some(token) = ym::token_from_url(u.as_str()) {
+                if !done.swap(true, Ordering::Relaxed) {
+                    save_ym_token(&h, token);
+                    ym_connected(&h);
+                }
+                return;
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Manual fallback: the user pastes the token (or the whole address with it).
+#[tauri::command]
+fn ym_set_token(app: AppHandle, value: String) -> Result<(), String> {
+    let v = value.trim();
+    let token = ym::token_from_url(v).unwrap_or_else(|| v.to_string());
+    if token.len() < 20 || token.contains(char::is_whitespace) {
+        return Err("Это не похоже на токен".into());
+    }
+    save_ym_token(&app, token);
     Ok(())
 }
 
@@ -2353,6 +2394,7 @@ fn main() {
             ym_set,
             ym_login,
             ym_logout,
+            ym_set_token,
             clip_read_text,
             paste_text,
             notes_load,

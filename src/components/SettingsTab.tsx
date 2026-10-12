@@ -405,6 +405,34 @@ export function SettingsTab({
             </button>
           )}
         </div>
+        {!settings.ymToken && (
+          <div className="setting setting-wide">
+            <div>
+              <div className="setting-title">Или вставьте токен вручную</div>
+              <div className="setting-sub">
+                <a
+                  href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    call("open_target", { target: "https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d", count: false });
+                  }}
+                >
+                  Откройте вход в браузере
+                </a>
+                , войдите и скопируйте адрес страницы, куда вас перенесёт (в нём есть access_token)
+              </div>
+            </div>
+            <TextField
+              value=""
+              secret
+              setBusy={setBusy}
+              placeholder="Адрес или токен"
+              onSave={(v) => {
+                if (v) call("ym_set_token", { value: v }).catch((e) => alert(String(e)));
+              }}
+            />
+          </div>
+        )}
 
         <div className="settings-section">Жильцы</div>
         <div className="setting">
