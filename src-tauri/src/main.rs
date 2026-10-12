@@ -205,6 +205,10 @@ struct Shared {
     voice_active: AtomicBool,
     recording: Mutex<Option<record::Recording>>,
     ym: ym::Shared,
+    /// the hidden YouTube player is the one playing («без цензуры»)
+    yt_active: AtomicBool,
+    /// track that could not be found on YouTube: Yandex plays it itself
+    yt_failed: Mutex<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -527,22 +531,24 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
             let mut cover_tries = 0u32;
             let mut cover_id = 0u32;
             let mut has_cover = false;
+            let mut auto_key = String::new();
             loop {
                 // while music plays the position is re-read more often: lyrics follow it
                 let poll = if shared.media_playing.load(Ordering::Relaxed) { 300 } else { 700 };
                 match rx.recv_timeout(Duration::from_millis(poll)) {
                     Ok(cmd) => {
-                        let _ = media.control(&cmd.action, cmd.value);
+                        route_media(&app, &shared, &media, &cmd);
                         // quick clicks (next, next, next) go out together, then
                         // one pause lets the player update its state
                         while let Ok(more) = rx.try_recv() {
-                            let _ = media.control(&more.action, more.value);
+                            route_media(&app, &shared, &media, &more);
                         }
                         thread::sleep(Duration::from_millis(250));
                     }
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
+                auto_uncensored(&app, &shared, &media, &mut auto_key);
                 let state = media.state();
                 if let Some(s) = &state {
                     let key = format!("{}\u{1}{}\u{1}{}\u{1}{}", s.app_id, s.title, s.artist, s.album);
@@ -2108,6 +2114,192 @@ async fn ym_lyrics(state: St<'_>, artist: String, title: String, duration_ms: Op
     ym::lyrics(&shared.ym, &token, &artist, &title, duration_ms.unwrap_or(0)).await
 }
 
+
+// ---------------------------------------------------------------------------
+// «Без цензуры»: Yandex Music picks, YouTube Music plays (hidden window)
+// ---------------------------------------------------------------------------
+
+const YM: &[&str] = &["yandex"];
+/// how the island's own WebView2 media session shows up in Windows
+const OWN_PLAYER: &str = "island|webview";
+
+/// Injected into the YouTube window: reports the end of a track by "navigating"
+/// to a sentinel address (cancelled in on_navigation), since external pages
+/// have no IPC.
+const YT_SCRIPT: &str = r#"(function(){
+  if (!/youtube\.com$/.test(location.hostname)) return;
+  var sent = '';
+  function hook(){
+    var v = document.querySelector('video');
+    if (!v || v.__island) return;
+    v.__island = 1;
+    var done = function(){
+      var id = location.href;
+      if (sent === id) return;
+      sent = id;
+      location.href = 'https://island.invalid/ended';
+    };
+    v.addEventListener('ended', done);
+    v.addEventListener('timeupdate', function(){
+      if (v.duration > 20 && v.currentTime > v.duration - 0.7) done();
+    });
+  }
+  new MutationObserver(hook).observe(document.documentElement, {childList:true, subtree:true});
+  hook();
+})();"#;
+
+fn yt_eval(app: &AppHandle, js: &str) {
+    if let Some(w) = app.get_webview_window("yt") {
+        let _ = w.eval(js);
+    }
+}
+
+/// Island buttons while YouTube plays: play/pause/seek go to the YouTube page,
+/// next/previous move Yandex Music's queue (which then hands the track over again).
+fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) {
+    if let Some(a) = cmd.action.strip_prefix("ym:") {
+        let _ = media.control_of(YM, a, cmd.value);
+        return;
+    }
+    if shared.yt_active.load(Ordering::Relaxed) && app.get_webview_window("yt").is_some() {
+        match cmd.action.as_str() {
+            "toggle" => yt_eval(app, "(function(){var v=document.querySelector('video');if(v){v.paused?v.play():v.pause()}})()"),
+            "pause" => yt_eval(app, "(function(){var v=document.querySelector('video');if(v)v.pause()})()"),
+            "play" => yt_eval(app, "(function(){var v=document.querySelector('video');if(v)v.play()})()"),
+            "seek" => yt_eval(
+                app,
+                &format!("(function(){{var v=document.querySelector('video');if(v)v.currentTime={}}})()", cmd.value / 1000.0),
+            ),
+            "next" | "prev" => {
+                let _ = media.control_of(YM, &cmd.action, 0.0);
+            }
+            _ => {}
+        }
+        return;
+    }
+    let _ = media.control(&cmd.action, cmd.value);
+}
+
+/// Opens (or reuses) the YouTube player window. Own WebView2 profile: the user
+/// signs in to YouTube there once; autoplay is allowed.
+async fn yt_open(app: &AppHandle, shared: &Shared, url: &str, visible: bool) -> Result<(), String> {
+    let target: tauri::Url = url.parse().map_err(|_| "bad url".to_string())?;
+    if let Some(w) = app.get_webview_window("yt") {
+        w.navigate(target).map_err(|e| e.to_string())?;
+        if visible {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        return Ok(());
+    }
+    let dir = shared.paths.dir.join("youtube-webview");
+    let handle = app.clone();
+    WebviewWindowBuilder::new(app, "yt", WebviewUrl::External(target))
+        .title("Island — без цензуры")
+        .inner_size(980.0, 640.0)
+        .center()
+        .visible(visible)
+        .skip_taskbar(!visible)
+        .data_directory(dir)
+        .additional_browser_args("--autoplay-policy=no-user-gesture-required")
+        .initialization_script(YT_SCRIPT)
+        .on_navigation(move |u| {
+            if u.host_str() == Some("island.invalid") {
+                // the YouTube track ended: next one comes from Yandex Music's queue
+                let s = handle.state::<Arc<Shared>>();
+                let _ = lock(&s.media_tx).send(MediaCmd {
+                    action: "ym:next".into(),
+                    value: 0.0,
+                });
+                return false;
+            }
+            true
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Finds the Yandex track on YouTube and plays it in the hidden window.
+async fn yt_switch(app: AppHandle, shared: Arc<Shared>, artist: String, title: String, duration_ms: i64, track: String) {
+    let key = lock(&shared.settings).yt_key.trim().to_string();
+    let found = yt::find(&key, &artist, &title, duration_ms).await;
+    match found {
+        Ok(Some(id)) => {
+            if let Err(e) = yt_open(&app, &shared, &yt::watch_url(&id), false).await {
+                toast_error(&app, "YouTube не открылся", &e);
+            }
+        }
+        other => {
+            // not found / no network: this track plays in Yandex Music as is
+            *lock(&shared.yt_failed) = track;
+            yt_eval(&app, "(function(){var v=document.querySelector('video');if(v)v.pause()})()");
+            let _ = lock(&shared.media_tx).send(MediaCmd {
+                action: "ym:play".into(),
+                value: 0.0,
+            });
+            let why = match other {
+                Err(e) => e,
+                _ => "Трек не найден на YouTube".into(),
+            };
+            toast_error(&app, "Играет обычная версия", &why);
+        }
+    }
+}
+
+/// Called from the media thread on every poll.
+fn auto_uncensored(app: &AppHandle, shared: &Arc<Shared>, media: &Media, auto_key: &mut String) {
+    let (on, has_key) = {
+        let s = lock(&shared.settings);
+        (s.yt_auto, !s.yt_key.trim().is_empty())
+    };
+    if !(on && has_key) {
+        if shared.yt_active.swap(false, Ordering::Relaxed) {
+            // switched off: close the hidden player, Yandex Music continues
+            media.set_prefer(None);
+            auto_key.clear();
+            if let Some(w) = app.get_webview_window("yt") {
+                let _ = w.close();
+            }
+            let _ = media.control_of(YM, "play", 0.0);
+        }
+        return;
+    }
+    let Some(y) = media.state_of(YM) else { return };
+    if !y.playing {
+        return;
+    }
+    let track = format!("{}\u{1}{}", y.artist, y.title);
+    if *lock(&shared.yt_failed) == track {
+        return; // not on YouTube: let Yandex play this one
+    }
+    let _ = media.control_of(YM, "pause", 0.0);
+    shared.yt_active.store(true, Ordering::Relaxed);
+    media.set_prefer(Some(OWN_PLAYER));
+    if *auto_key == track {
+        // the user pressed play in Yandex Music: resume YouTube instead
+        yt_eval(app, "(function(){var v=document.querySelector('video');if(v)v.play()})()");
+        return;
+    }
+    *auto_key = track.clone();
+    tauri::async_runtime::spawn(yt_switch(app.clone(), shared.clone(), y.artist, y.title, y.duration_ms, track));
+}
+
+/// Shows the YouTube player window (sign in once; Premium = no ads).
+#[tauri::command]
+async fn yt_show(app: AppHandle, state: St<'_>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    if let Some(w) = app.get_webview_window("yt") {
+        let _ = w.set_skip_taskbar(false);
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    yt_open(&app, &shared, "https://music.youtube.com/", true).await
+}
+
 /// «Без цензуры»: pauses the current player and plays the same track on
 /// YouTube Music in a player window (its own WebView2 profile: the user signs in
 /// to YouTube once, autoplay is allowed there).
@@ -2128,23 +2320,7 @@ async fn uncensored(app: AppHandle, state: St<'_>, artist: String, title: String
         action: "pause".into(),
         value: 0.0,
     });
-    let target: tauri::Url = url.parse().map_err(|_| "bad url".to_string())?;
-    if let Some(w) = app.get_webview_window("yt") {
-        w.navigate(target).map_err(|e| e.to_string())?;
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-        return Ok(found.is_some());
-    }
-    let dir = shared.paths.dir.join("youtube-webview");
-    WebviewWindowBuilder::new(&app, "yt", WebviewUrl::External(target))
-        .title("Island — без цензуры")
-        .inner_size(980.0, 640.0)
-        .center()
-        .data_directory(dir)
-        .additional_browser_args("--autoplay-policy=no-user-gesture-required")
-        .build()
-        .map_err(|e| e.to_string())?;
+    yt_open(&app, &shared, &url, true).await?;
     Ok(found.is_some())
 }
 
@@ -2442,6 +2618,8 @@ fn main() {
                 voice_active: AtomicBool::new(false),
                 recording: Mutex::new(None),
                 ym: Mutex::new(ym::Cache::default()),
+                yt_active: AtomicBool::new(false),
+                yt_failed: Mutex::new(String::new()),
             });
             app.manage(shared.clone());
 
@@ -2531,6 +2709,7 @@ fn main() {
             ym_set_token,
             ym_lyrics,
             uncensored,
+            yt_show,
             clip_read_text,
             paste_text,
             notes_load,

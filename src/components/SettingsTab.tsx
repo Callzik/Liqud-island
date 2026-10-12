@@ -468,6 +468,22 @@ export function SettingsTab({
           </div>
           <TextField value={settings.ytKey} onSave={(v) => set("ytKey", v)} setBusy={setBusy} placeholder="AIza…" secret />
         </div>
+        {settings.ytKey && (
+          <div className="setting setting-wide">
+            <div>
+              <div className="setting-title">Без цензуры автоматически</div>
+              <div className="setting-sub">
+                Яндекс Музыка выбирает треки, звук идёт с YouTube Music в скрытом окне. Пауза и «вперёд» на острове управляют обоими.
+              </div>
+            </div>
+            <div className="model-picker">
+              <button className="text-btn" onClick={() => call("yt_show")} title="Показать окно YouTube — например, чтобы войти в аккаунт">
+                Окно YouTube
+              </button>
+              <Toggle checked={settings.ytAuto} onChange={(v) => set("ytAuto", v)} />
+            </div>
+          </div>
+        )}
 
         <div className="settings-section">Жильцы</div>
         <div className="setting">

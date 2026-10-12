@@ -54,6 +54,7 @@ const state = {
     ymToken: "demo",
     theme: "black",
     ytKey: "",
+    ytAuto: false,
   },
   data: {
     shelf: [

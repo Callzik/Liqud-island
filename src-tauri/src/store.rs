@@ -124,6 +124,8 @@ pub struct Settings {
     pub theme: String,
     /// YouTube Data API key for «Без цензуры» (optional; without it the search page opens).
     pub yt_key: String,
+    /// «Без цензуры» auto mode: Yandex Music picks the tracks, YouTube Music plays them.
+    pub yt_auto: bool,
 }
 
 impl Default for Settings {
@@ -160,6 +162,7 @@ impl Default for Settings {
             ym_token: String::new(),
             theme: "black".into(),
             yt_key: String::new(),
+            yt_auto: false,
         }
     }
 }

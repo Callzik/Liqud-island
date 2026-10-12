@@ -39,6 +39,7 @@ export interface Settings {
   ymToken: string;
   theme: "black" | "glass";
   ytKey: string;
+  ytAuto: boolean;
 }
 
 export interface ShelfItem {

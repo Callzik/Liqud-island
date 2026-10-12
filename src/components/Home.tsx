@@ -48,9 +48,10 @@ function MediaCard({
   cover,
   accent,
   settings,
+  saveSettings,
   toast,
   setTab,
-}: Pick<PanelProps, "media" | "mediaAt" | "cover" | "accent" | "settings" | "toast" | "setTab">) {
+}: Pick<PanelProps, "media" | "mediaAt" | "cover" | "accent" | "settings" | "saveSettings" | "toast" | "setTab">) {
   const [ym, setYm, ymPlayer] = useYm(media, settings.ymToken);
   const rate = async (kind: "like" | "dislike") => {
     if (!settings.ymToken) {
@@ -103,25 +104,37 @@ function MediaCard({
       <div className="media-info">
         <div className="media-app">
           {media.app}
-          {ymPlayer && (
+          {(ymPlayer || settings.ytAuto) && (
             <button
-              className="uncensored"
-              title="Включить этот трек на YouTube Music — оригинальная версия, без вырезанных слов"
+              className={`uncensored ${settings.ytAuto ? "on" : ""}`}
+              title={
+                settings.ytKey
+                  ? settings.ytAuto
+                    ? "Без цензуры включено: треки из Яндекс Музыки играют с YouTube Music. Нажмите, чтобы выключить"
+                    : "Играть треки Яндекс Музыки с YouTube Music — оригинальные версии, без вырезанных слов"
+                  : "Открыть этот трек на YouTube Music (для автоматического режима добавьте ключ YouTube в настройках)"
+              }
               onClick={async () => {
-                try {
-                  const exact = await call<boolean>("uncensored", { artist: media.artist, title: media.title, durationMs: media.durationMs });
+                if (settings.ytKey) {
+                  saveSettings({ ...settings, ytAuto: !settings.ytAuto });
                   toast(
-                    exact
-                      ? { icon: "check", title: "Включаю на YouTube Music", subtitle: media.title }
-                      : { icon: "check", title: "Открыл поиск на YouTube Music", subtitle: "Выберите трек — для автопоиска добавьте ключ YouTube в настройках" },
-                    3500,
+                    settings.ytAuto
+                      ? { icon: "check", title: "Без цензуры выключено", subtitle: "Дальше играет Яндекс Музыка" }
+                      : { icon: "check", title: "Без цензуры включено", subtitle: "Яндекс выбирает треки, звук — с YouTube Music" },
+                    3000,
                   );
+                  return;
+                }
+                if (!media) return;
+                try {
+                  await call<boolean>("uncensored", { artist: media.artist, title: media.title, durationMs: media.durationMs });
+                  toast({ icon: "check", title: "Открыл поиск на YouTube Music", subtitle: "Для автоматического режима добавьте ключ YouTube в настройках" }, 3500);
                 } catch (e) {
                   toast({ icon: "error", tone: "error", title: "Не получилось", subtitle: String(e) }, 3500);
                 }
               }}
             >
-              E · без цензуры
+              E · без цензуры{settings.ytAuto ? " · вкл" : ""}
             </button>
           )}
         </div>
@@ -315,7 +328,7 @@ export function Home(p: PanelProps) {
   return (
     <div className="home">
       <div className="home-left">
-        <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} toast={p.toast} setTab={p.setTab} />
+        <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} saveSettings={p.saveSettings} toast={p.toast} setTab={p.setTab} />
         <VolumeRow volume={p.volume} />
       </div>
       <div className="actions">

@@ -34,17 +34,57 @@ pub struct Thumb {
 
 pub struct Media {
     manager: Manager,
+    /// sessions whose app id contains this are shown first (the island's own
+    /// YouTube player while «без цензуры» runs)
+    prefer: std::cell::RefCell<Option<String>>,
+}
+
+fn app_of(s: &Session) -> String {
+    s.SourceAppUserModelId().map(|h| h.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
 impl Media {
     /// Must be called on a COM-initialised (MTA) thread.
     pub fn new() -> Result<Self> {
         let manager = Manager::RequestAsync()?.join()?;
-        Ok(Self { manager })
+        Ok(Self { manager, prefer: std::cell::RefCell::new(None) })
+    }
+
+    pub fn set_prefer(&self, needle: Option<&str>) {
+        *self.prefer.borrow_mut() = needle.map(|n| n.to_lowercase());
+    }
+
+    /// The first session whose app id contains one of `needles`.
+    fn find(&self, needles: &[&str]) -> Option<Session> {
+        let list = self.manager.GetSessions().ok()?;
+        let n = list.Size().unwrap_or(0);
+        (0..n).filter_map(|i| list.GetAt(i).ok()).find(|s| {
+            let id = app_of(s);
+            needles.iter().any(|k| id.contains(k))
+        })
+    }
+
+    /// State of a specific app's session (e.g. "yandex"), playing or not.
+    pub fn state_of(&self, needles: &[&str]) -> Option<MediaState> {
+        self.find(needles).and_then(|s| self.state_from(s))
+    }
+
+    /// Sends a command to a specific app's session.
+    pub fn control_of(&self, needles: &[&str], action: &str, value: f64) -> Result<()> {
+        match self.find(needles) {
+            Some(s) => Self::run(&s, action, value),
+            None => Ok(()),
+        }
     }
 
     /// Prefers a session that is actually playing, then the system "current" one.
     fn session(&self) -> Option<Session> {
+        if let Some(p) = self.prefer.borrow().clone() {
+            let parts: Vec<&str> = p.split('|').collect();
+            if let Some(s) = self.find(&parts) {
+                return Some(s);
+            }
+        }
         if let Ok(list) = self.manager.GetSessions() {
             let n = list.Size().unwrap_or(0);
             for i in 0..n {
@@ -65,6 +105,10 @@ impl Media {
 
     pub fn state(&self) -> Option<MediaState> {
         let s = self.session()?;
+        self.state_from(s)
+    }
+
+    fn state_from(&self, s: Session) -> Option<MediaState> {
         let props = s.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
         let title = props.Title().map(|h| h.to_string_lossy()).unwrap_or_default();
         if title.is_empty() {
@@ -144,7 +188,14 @@ impl Media {
 
     pub fn control(&self, action: &str, value: f64) -> Result<()> {
         let Some(s) = self.session() else { return Ok(()) };
+        Self::run(&s, action, value)
+    }
+
+    fn run(s: &Session, action: &str, value: f64) -> Result<()> {
         match action {
+            "play" => {
+                s.TryPlayAsync()?.join()?;
+            }
             "toggle" => {
                 s.TryTogglePlayPauseAsync()?.join()?;
             }
