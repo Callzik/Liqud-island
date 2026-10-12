@@ -55,6 +55,7 @@ const state = {
     theme: "black",
     ytKey: "",
     ytAuto: false,
+    lyricsInIsland: true,
   },
   data: {
     shelf: [

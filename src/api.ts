@@ -40,6 +40,7 @@ export interface Settings {
   theme: "black" | "glass";
   ytKey: string;
   ytAuto: boolean;
+  lyricsInIsland: boolean;
 }
 
 export interface ShelfItem {

@@ -155,7 +155,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   // set during render, so the lyrics key below already knows the source
   setYandexLyrics(!!settings.ymToken);
   const lyrics = useLyrics(media);
-  const lyricsInIsland = mode === "music" && !!lyrics.lines;
+  const lyricsInIsland = mode === "music" && settings.lyricsInIsland !== false && !!lyrics.lines;
 
   const box =
     mode === "launcher"
@@ -596,7 +596,14 @@ export default function App({ boot }: { boot: InitPayload }) {
       case "idle":
         return weather && settings.weatherEnabled ? <WeatherCompact weather={weather} /> : null;
       case "music":
-        return <Compact cover={cover.url} media={media} mediaAt={mediaAt} lyrics={lyrics} />;
+        return (
+          <Compact
+            cover={cover.url}
+            media={media}
+            mediaAt={mediaAt}
+            lyrics={settings.lyricsInIsland !== false ? lyrics : { ...lyrics, lines: null }}
+          />
+        );
       case "peek":
         return media ? <Peek media={media} cover={cover.url} /> : null;
       case "toast":

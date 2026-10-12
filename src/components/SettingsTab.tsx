@@ -269,6 +269,7 @@ export function SettingsTab({
     { key: "downloadsEnabled", title: "Загрузки браузера", sub: "Прогресс в острове, «Загружено» → открыть или на полку" },
     { key: "textEnabled", title: "Вкладка «Текст»", sub: "Регистр, транслит, раскладка, пробелы" },
     { key: "notesEnabled", title: "Вкладка «Заметки»", sub: "Сохраняются автоматически" },
+    { key: "lyricsInIsland", title: "Текст песни в свёрнутом острове", sub: "Текущая строка между обложкой и эквалайзером" },
   ];
 
   return (

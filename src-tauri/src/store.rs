@@ -126,6 +126,8 @@ pub struct Settings {
     pub yt_key: String,
     /// «Без цензуры» auto mode: Yandex Music picks the tracks, YouTube Music plays them.
     pub yt_auto: bool,
+    /// Current lyric line inside the collapsed island.
+    pub lyrics_in_island: bool,
 }
 
 impl Default for Settings {
@@ -163,6 +165,7 @@ impl Default for Settings {
             theme: "black".into(),
             yt_key: String::new(),
             yt_auto: false,
+            lyrics_in_island: true,
         }
     }
 }
