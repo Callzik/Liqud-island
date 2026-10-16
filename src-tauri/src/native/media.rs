@@ -37,6 +37,18 @@ pub struct Media {
     /// sessions whose app id contains this are shown first (the island's own
     /// YouTube player while «без цензуры» runs)
     prefer: std::cell::RefCell<Option<String>>,
+    /// the session shown last time: cover and buttons go to the same one
+    active: std::cell::RefCell<Option<Session>>,
+    /// last good state; bridges moments when a player (Liner, Electron apps)
+    /// briefly returns no metadata while switching tracks
+    last: std::cell::RefCell<Option<(MediaState, std::time::Instant)>>,
+}
+
+/// How long a vanished state is still shown while its player stays in the list.
+const GRACE: std::time::Duration = std::time::Duration::from_millis(2500);
+
+fn status_of(s: &Session) -> Option<Status> {
+    s.GetPlaybackInfo().and_then(|p| p.PlaybackStatus()).ok()
 }
 
 fn app_of(s: &Session) -> String {
@@ -47,7 +59,12 @@ impl Media {
     /// Must be called on a COM-initialised (MTA) thread.
     pub fn new() -> Result<Self> {
         let manager = Manager::RequestAsync()?.join()?;
-        Ok(Self { manager, prefer: std::cell::RefCell::new(None) })
+        Ok(Self {
+            manager,
+            prefer: std::cell::RefCell::new(None),
+            active: std::cell::RefCell::new(None),
+            last: std::cell::RefCell::new(None),
+        })
     }
 
     pub fn set_prefer(&self, needle: Option<&str>) {
@@ -77,44 +94,91 @@ impl Media {
         }
     }
 
-    /// Prefers a session that is actually playing, then the system "current" one.
-    fn session(&self) -> Option<Session> {
-        if let Some(p) = self.prefer.borrow().clone() {
-            let parts: Vec<&str> = p.split('|').collect();
-            if let Some(s) = self.find(&parts) {
-                return Some(s);
-            }
-        }
-        if let Ok(list) = self.manager.GetSessions() {
-            let n = list.Size().unwrap_or(0);
-            for i in 0..n {
-                if let Ok(s) = list.GetAt(i) {
-                    let playing = s
-                        .GetPlaybackInfo()
-                        .and_then(|p| p.PlaybackStatus())
-                        .map(|st| st == Status::Playing)
-                        .unwrap_or(false);
-                    if playing {
-                        return Some(s);
+    /// All sessions, best first: the preferred app, playing (or switching
+    /// tracks), the system "current" one, paused, the rest. Some players
+    /// (Liner among them) are never the "current" session and sometimes
+    /// publish an empty title, so every session is a candidate.
+    fn candidates(&self) -> Vec<Session> {
+        let Ok(list) = self.manager.GetSessions() else { return Vec::new() };
+        let n = list.Size().unwrap_or(0);
+        let prefer = self.prefer.borrow().clone();
+        let parts: Vec<String> = prefer.map(|p| p.split('|').map(String::from).collect()).unwrap_or_default();
+        let current = self.manager.GetCurrentSession().ok().map(|s| app_of(&s));
+        let mut all: Vec<(u8, Session)> = (0..n)
+            .filter_map(|i| list.GetAt(i).ok())
+            .map(|s| {
+                let id = app_of(&s);
+                let rank = if !parts.is_empty() && parts.iter().any(|k| id.contains(k.as_str())) {
+                    0
+                } else {
+                    match status_of(&s) {
+                        Some(Status::Playing) | Some(Status::Changing) => 1,
+                        _ if current.as_deref() == Some(id.as_str()) => 2,
+                        Some(Status::Paused) => 3,
+                        _ => 4,
                     }
-                }
-            }
+                };
+                (rank, s)
+            })
+            .collect();
+        all.sort_by_key(|(r, _)| *r);
+        all.into_iter().map(|(_, s)| s).collect()
+    }
+
+    fn session(&self) -> Option<Session> {
+        if let Some(s) = self.active.borrow().clone() {
+            return Some(s);
         }
-        self.manager.GetCurrentSession().ok()
+        self.candidates().into_iter().next()
     }
 
     pub fn state(&self) -> Option<MediaState> {
-        let s = self.session()?;
-        self.state_from(s)
+        let cands = self.candidates();
+        let last = self.last.borrow().clone();
+        for s in cands {
+            if let Some(st) = self.state_from(s.clone()) {
+                *self.active.borrow_mut() = Some(s);
+                *self.last.borrow_mut() = Some((st.clone(), std::time::Instant::now()));
+                return Some(st);
+            }
+            // the shown player is still here but its metadata blinked:
+            // keep the old state instead of jumping to another app
+            if let Some((prev, at)) = &last {
+                if at.elapsed() < GRACE && app_of(&s) == prev.app_id.to_lowercase() {
+                    let mut st = prev.clone();
+                    st.playing = matches!(status_of(&s), Some(Status::Playing) | Some(Status::Changing));
+                    *self.active.borrow_mut() = Some(s);
+                    return Some(st);
+                }
+            }
+        }
+        *self.active.borrow_mut() = None;
+        None
     }
 
     fn state_from(&self, s: Session) -> Option<MediaState> {
         let props = s.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
-        let title = props.Title().map(|h| h.to_string_lossy()).unwrap_or_default();
+        let mut title = props.Title().map(|h| h.to_string_lossy()).unwrap_or_default().trim().to_string();
+        let mut artist = props.Artist().map(|h| h.to_string_lossy()).unwrap_or_default().trim().to_string();
+        if artist.is_empty() {
+            artist = props.AlbumArtist().map(|h| h.to_string_lossy()).unwrap_or_default().trim().to_string();
+        }
+        // some players put everything into the title: "Artist - Song"
+        if artist.is_empty() {
+            for sep in [" - ", " \u{2014} ", " \u{2013} "] {
+                if let Some((a, t)) = title.split_once(sep) {
+                    if !a.trim().is_empty() && !t.trim().is_empty() {
+                        let (a, t) = (a.trim().to_string(), t.trim().to_string());
+                        artist = a;
+                        title = t;
+                        break;
+                    }
+                }
+            }
+        }
         if title.is_empty() {
             return None;
         }
-        let artist = props.Artist().map(|h| h.to_string_lossy()).unwrap_or_default();
         let album = props.AlbumTitle().map(|h| h.to_string_lossy()).unwrap_or_default();
         let app_id = s.SourceAppUserModelId().map(|h| h.to_string_lossy()).unwrap_or_default();
 

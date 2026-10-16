@@ -416,6 +416,7 @@ fn media_app_name(id: &str) -> String {
         ("deezer", "Deezer"),
         ("tidal", "TIDAL"),
         ("soundcloud", "SoundCloud"),
+        ("liner", "Liner"),
         ("aimp", "AIMP"),
         ("foobar", "foobar2000"),
         ("vlc", "VLC"),
