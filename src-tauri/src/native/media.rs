@@ -108,21 +108,53 @@ impl Media {
             .filter_map(|i| list.GetAt(i).ok())
             .map(|s| {
                 let id = app_of(&s);
-                let rank = if !parts.is_empty() && parts.iter().any(|k| id.contains(k.as_str())) {
-                    0
-                } else {
-                    match status_of(&s) {
-                        Some(Status::Playing) | Some(Status::Changing) => 1,
-                        _ if current.as_deref() == Some(id.as_str()) => 2,
-                        Some(Status::Paused) => 3,
-                        _ => 4,
-                    }
+                let preferred = !parts.is_empty() && parts.iter().any(|k| id.contains(k.as_str()));
+                let playing = matches!(status_of(&s), Some(Status::Playing) | Some(Status::Changing));
+                // a paused preferred player must not hide another app that plays
+                let rank = match (preferred, playing) {
+                    (true, true) => 0,
+                    (false, true) => 1,
+                    (true, false) => 2,
+                    _ if current.as_deref() == Some(id.as_str()) => 3,
+                    _ if status_of(&s) == Some(Status::Paused) => 4,
+                    _ => 5,
                 };
                 (rank, s)
             })
             .collect();
         all.sort_by_key(|(r, _)| *r);
         all.into_iter().map(|(_, s)| s).collect()
+    }
+
+    /// Every session as Windows reports it, for the tray's diagnostics item.
+    pub fn dump(&self) -> String {
+        let current = self.manager.GetCurrentSession().ok().map(|s| app_of(&s));
+        let mut out = String::new();
+        let Ok(list) = self.manager.GetSessions() else { return "GetSessions: ошибка".into() };
+        let n = list.Size().unwrap_or(0);
+        out.push_str(&format!("Сессий: {n}, текущая: {}\n", current.clone().unwrap_or_else(|| "-".into())));
+        for s in (0..n).filter_map(|i| list.GetAt(i).ok()) {
+            let id = s.SourceAppUserModelId().map(|h| h.to_string_lossy()).unwrap_or_default();
+            let status = match status_of(&s) {
+                Some(Status::Playing) => "playing",
+                Some(Status::Paused) => "paused",
+                Some(Status::Changing) => "changing",
+                Some(Status::Stopped) => "stopped",
+                Some(Status::Opened) => "opened",
+                Some(Status::Closed) => "closed",
+                _ => "?",
+            };
+            let props = s.TryGetMediaPropertiesAsync().and_then(|p| p.join());
+            let (title, artist) = match &props {
+                Ok(p) => (
+                    p.Title().map(|h| h.to_string_lossy()).unwrap_or_default(),
+                    p.Artist().map(|h| h.to_string_lossy()).unwrap_or_default(),
+                ),
+                Err(e) => (format!("<ошибка {e}>"), String::new()),
+            };
+            out.push_str(&format!("{id} | {status} | {artist} — {title}\n"));
+        }
+        out
     }
 
     fn session(&self) -> Option<Session> {

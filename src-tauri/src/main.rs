@@ -2158,6 +2158,18 @@ fn yt_eval(app: &AppHandle, js: &str) {
 /// Island buttons while YouTube plays: play/pause/seek go to the YouTube page,
 /// next/previous move Yandex Music's queue (which then hands the track over again).
 fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) {
+    if cmd.action == "dump" {
+        let ok = clip::write_text(&media.dump());
+        toast(
+            app,
+            ToastPayload {
+                icon: "copy".into(),
+                title: if ok { "Медиасессии скопированы".into() } else { "Не удалось скопировать".into() },
+                ..Default::default()
+            },
+        );
+        return;
+    }
     if let Some(a) = cmd.action.strip_prefix("ym:") {
         let _ = media.control_of(YM, a, cmd.value);
         return;
@@ -2507,9 +2519,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let launcher = MenuItem::with_id(app, "launcher", "Лаунчер", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Настройки", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
+    let dump = MenuItem::with_id(app, "media-dump", "Скопировать медиасессии", true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "restart", "Перезапустить", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &launcher, &settings, &sep, &restart, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &launcher, &settings, &sep, &dump, &restart, &quit])?;
     let mut builder = TrayIconBuilder::with_id("island")
         .tooltip("Island")
         .menu(&menu)
@@ -2521,6 +2534,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "launcher" => set_launcher(app, true),
             "settings" => {
                 let _ = app.emit("open-panel", "settings");
+            }
+            "media-dump" => {
+                let st = app.state::<Arc<Shared>>();
+                let _ = lock(&st.media_tx).send(MediaCmd { action: "dump".into(), value: 0.0 });
             }
             "restart" => {
                 finish_recording_before_exit(app);
