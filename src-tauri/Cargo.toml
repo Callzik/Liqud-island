@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.4.7"
+version = "0.4.8"
 description = "Liquid Dynamic Island for Windows 10/11"
 authors = ["Callzik"]
 edition = "2021"
