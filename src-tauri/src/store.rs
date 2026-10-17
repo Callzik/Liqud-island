@@ -128,6 +128,10 @@ pub struct Settings {
     pub yt_auto: bool,
     /// Current lyric line inside the collapsed island.
     pub lyrics_in_island: bool,
+    /// Look for a new release on GitHub at start and every few hours.
+    pub update_check: bool,
+    /// Version the user chose to skip.
+    pub update_skip: String,
 }
 
 impl Default for Settings {
@@ -166,6 +170,8 @@ impl Default for Settings {
             yt_key: String::new(),
             yt_auto: false,
             lyrics_in_island: true,
+            update_check: true,
+            update_skip: String::new(),
         }
     }
 }

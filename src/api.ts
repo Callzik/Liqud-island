@@ -41,6 +41,8 @@ export interface Settings {
   ytKey: string;
   ytAuto: boolean;
   lyricsInIsland: boolean;
+  updateCheck: boolean;
+  updateSkip: string;
 }
 
 export interface ShelfItem {

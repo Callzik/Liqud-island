@@ -51,10 +51,12 @@ src-tauri/src/
   yt.rs                YouTube Data API: поиск того же трека
   record.rs            запись экрана в MP4 (windows-capture)
   ai.rs weather.rs voice.rs downloads.rs clips.rs
+  update.rs            автообновление: releases/latest → *-setup.exe в %TEMP% → запуск с /P /UPDATE /R
   native/              media (GSMTC), audio (Core Audio, IPolicyConfig), capture (GDI, OCR, QR), speech, clip, input, shell, img
 ```
 
-Фоновые потоки в `main.rs`: media (опрос 300 мс при игре, иначе 700), backdrop (для стекла), weather, voice, downloads.
+Фоновые потоки в `main.rs`: media (опрос 300 мс при игре, иначе 700), backdrop (для стекла), weather, voice, downloads,
+update (через 30 с после старта и каждые 6 ч; тост «Обновить / Пропустить», `settings.updateCheck`, `updateSkip`).
 
 ## Функции (что уже есть)
 
@@ -91,7 +93,7 @@ LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ct
 
 ## Идеи на будущее (пользователь ещё не выбрал)
 
-1. Автообновление из релизов GitHub. 2. Уведомления Windows в острове (UserNotificationListener).
+2. Уведомления Windows в острове (UserNotificationListener).
 3. Громкость/яркость — полоска в острове вместо системного окна. 4. Визуализатор звука у обложки.
 5. Цвет острова под обложку. 6. Анимация наушников и зарядки. 7. Таймер / секундомер / помодоро.
 8. Яндекс Музыка глубже: «Моя волна», очередь, плейлисты. 9. Перевод текста песни.
@@ -107,3 +109,4 @@ LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ct
   0.3.8 — вход в ЯМ без белого экрана; 0.3.9 — тексты из ЯМ и настойчивый поиск в LRCLIB.
 - 0.4.0 — Liquid Glass / чёрный; 0.4.1 — «Без цензуры» (окно YouTube); 0.4.2 — «Без цензуры» автоматически;
   0.4.3 — текст песни в свёрнутом острове можно выключить.
+- 0.4.4–0.4.6 — медиасессии, Dotify; 0.4.7 — автообновление из релизов GitHub (тост, трей, настройки).

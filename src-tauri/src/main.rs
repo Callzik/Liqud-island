@@ -7,6 +7,7 @@ mod record;
 mod downloads;
 mod native;
 mod store;
+mod update;
 mod voice;
 mod weather;
 mod ym;
@@ -2543,6 +2544,120 @@ fn chat_save(state: St<'_>, messages: serde_json::Value) {
 }
 
 // ---------------------------------------------------------------------------
+// Updates from GitHub releases
+// ---------------------------------------------------------------------------
+
+fn update_toast(app: &AppHandle, r: &update::Release) {
+    toast(
+        app,
+        ToastPayload {
+            icon: "download".into(),
+            title: format!("Вышел Island {}", r.version),
+            subtitle: Some(format!("У вас {}", app.package_info().version)),
+            actions: vec![
+                ToastAction {
+                    label: "Обновить".into(),
+                    cmd: "update_install".into(),
+                    args: serde_json::json!({}),
+                },
+                ToastAction {
+                    label: "Пропустить".into(),
+                    cmd: "update_skip".into(),
+                    args: serde_json::json!({ "version": r.version }),
+                },
+            ],
+            ms: Some(20000),
+            ..Default::default()
+        },
+    );
+}
+
+/// 30 s after start, then every 6 hours; each version is offered once per run.
+fn spawn_update_thread(app: AppHandle, shared: Arc<Shared>) {
+    thread::Builder::new()
+        .name("update".into())
+        .spawn(move || {
+            thread::sleep(Duration::from_secs(30));
+            let current = app.package_info().version.to_string();
+            let mut offered = String::new();
+            loop {
+                let s = lock(&shared.settings).clone();
+                if s.update_check {
+                    if let Ok(Some(r)) = tauri::async_runtime::block_on(update::check(&current)) {
+                        if r.version != offered && r.version != s.update_skip {
+                            offered = r.version.clone();
+                            update_toast(&app, &r);
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_secs(6 * 3600));
+            }
+        })
+        .expect("failed to start update thread");
+}
+
+/// Manual check (settings, tray): always answers with a toast.
+#[tauri::command]
+async fn update_check(app: AppHandle, manual: bool) {
+    let current = app.package_info().version.to_string();
+    match update::check(&current).await {
+        Ok(Some(r)) => update_toast(&app, &r),
+        Ok(None) if manual => toast(
+            &app,
+            ToastPayload {
+                icon: "check".into(),
+                title: "Обновлений нет".into(),
+                subtitle: Some(format!("Island {current} — последняя версия")),
+                ..Default::default()
+            },
+        ),
+        Err(e) if manual => toast_error(&app, "Не удалось проверить обновления", &e),
+        _ => {}
+    }
+}
+
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    let current = app.package_info().version.to_string();
+    let r = match update::found() {
+        Some(r) => r,
+        None => update::check(&current).await?.ok_or("Обновлений нет")?,
+    };
+    toast(
+        &app,
+        ToastPayload {
+            icon: "download".into(),
+            title: format!("Скачиваю Island {}", r.version),
+            subtitle: Some("Остров перезапустится сам".into()),
+            ms: Some(60000),
+            ..Default::default()
+        },
+    );
+    match update::install(&r).await {
+        Ok(()) => {
+            finish_recording_before_exit(&app);
+            app.exit(0);
+            Ok(())
+        }
+        Err(e) => {
+            toast_error(&app, "Обновление не скачалось", &e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+fn update_skip(app: AppHandle, state: St<'_>, version: String) {
+    let next = {
+        let mut s = lock(&state.settings);
+        s.update_skip = version;
+        s.clone()
+    };
+    store::save_json_synced(&state.paths.settings(), &next);
+    let _ = app.emit("settings", next);
+}
+
+// ---------------------------------------------------------------------------
 // Tray & entry point
 // ---------------------------------------------------------------------------
 
@@ -2552,9 +2667,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, "settings", "Настройки", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let dump = MenuItem::with_id(app, "media-dump", "Скопировать медиасессии", true, None::<&str>)?;
+    let upd = MenuItem::with_id(app, "update", "Проверить обновления", true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "restart", "Перезапустить", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &launcher, &settings, &sep, &dump, &restart, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &launcher, &settings, &sep, &dump, &upd, &restart, &quit])?;
     let mut builder = TrayIconBuilder::with_id("island")
         .tooltip("Island")
         .menu(&menu)
@@ -2570,6 +2686,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "media-dump" => {
                 let st = app.state::<Arc<Shared>>();
                 let _ = lock(&st.media_tx).send(MediaCmd { action: "dump".into(), value: 0.0 });
+            }
+            "update" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { update_check(app, true).await });
             }
             "restart" => {
                 finish_recording_before_exit(app);
@@ -2704,6 +2824,7 @@ fn main() {
             spawn_voice_thread(app.handle().clone(), shared.clone(), voice_rx);
             spawn_downloads_thread(app.handle().clone(), shared.clone());
             spawn_backdrop_thread(app.handle().clone(), shared.clone());
+            spawn_update_thread(app.handle().clone(), shared.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2764,6 +2885,9 @@ fn main() {
             paste_text,
             notes_load,
             notes_save,
+            update_check,
+            update_install,
+            update_skip,
             quit
         ])
         .run(tauri::generate_context!())

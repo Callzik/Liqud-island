@@ -56,6 +56,8 @@ const state = {
     ytKey: "",
     ytAuto: false,
     lyricsInIsland: true,
+    updateCheck: true,
+    updateSkip: "",
   },
   data: {
     shelf: [

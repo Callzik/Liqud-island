@@ -270,6 +270,7 @@ export function SettingsTab({
     { key: "textEnabled", title: "Вкладка «Текст»", sub: "Регистр, транслит, раскладка, пробелы" },
     { key: "notesEnabled", title: "Вкладка «Заметки»", sub: "Сохраняются автоматически" },
     { key: "lyricsInIsland", title: "Текст песни в свёрнутом острове", sub: "Текущая строка между обложкой и эквалайзером" },
+    { key: "updateCheck", title: "Проверять обновления", sub: "Новая версия с GitHub — кнопка «Обновить» в острове" },
   ];
 
   return (
@@ -566,6 +567,9 @@ export function SettingsTab({
       </div>
       <div className="settings-foot">
         <span className="muted">Island {version} · Alt+Space — лаунчер · перетащите файл на остров — полка</span>
+        <button className="text-btn" style={{ marginLeft: "auto" }} onClick={() => call("update_check", { manual: true }).catch(() => {})}>
+          Проверить обновления
+        </button>
         <button
           className={`text-btn ${confirm ? "danger" : ""}`}
           onClick={() => {
