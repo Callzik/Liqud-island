@@ -4,8 +4,10 @@ import { useLyricSync, type LyricsState } from "../lib/useLyrics";
 import { IMusic } from "./Icons";
 
 function Cover({ url, size, radius }: { url: string | null; size: number; radius: number }) {
-  return url ? (
-    <img className="cover" src={url} alt="" style={{ width: size, height: size, borderRadius: radius }} draggable={false} />
+  // a cover the player sent broken shows the placeholder, not a broken image
+  const [bad, setBad] = useState<string | null>(null);
+  return url && url !== bad ? (
+    <img className="cover" src={url} alt="" style={{ width: size, height: size, borderRadius: radius }} draggable={false} onError={() => setBad(url)} />
   ) : (
     <div className="cover cover-empty" style={{ width: size, height: size, borderRadius: radius }}>
       <IMusic size={size * 0.55} />

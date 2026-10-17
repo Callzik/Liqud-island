@@ -17,7 +17,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -403,7 +403,24 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
     let _ = if enabled { al.enable() } else { al.disable() };
 }
 
-fn media_app_name(id: &str) -> String {
+/// Player name shown on the island. Known players by their id; others by the
+/// name Start shows for them (looked up once per id on the shell thread);
+/// last resort — the meaningful part of the id itself.
+fn media_app_name(shared: &Shared, id: &str) -> String {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(n) = lock(cache).get(id) {
+        return n.clone();
+    }
+    let owned = id.to_string();
+    let name = known_app_name(id)
+        .or_else(|| shared.shell.run(move || shell::app_display_name(&owned)).flatten())
+        .unwrap_or_else(|| app_name_from_id(id));
+    lock(cache).insert(id.to_string(), name.clone());
+    name
+}
+
+fn known_app_name(id: &str) -> Option<String> {
     let l = id.to_lowercase();
     const KNOWN: &[(&str, &str)] = &[
         ("spotify", "Spotify"),
@@ -417,6 +434,7 @@ fn media_app_name(id: &str) -> String {
         ("tidal", "TIDAL"),
         ("soundcloud", "SoundCloud"),
         ("liner", "Liner"),
+        ("dotify", "Dotify"),
         ("aimp", "AIMP"),
         ("foobar", "foobar2000"),
         ("vlc", "VLC"),
@@ -430,18 +448,32 @@ fn media_app_name(id: &str) -> String {
         ("vivaldi", "Vivaldi"),
         ("yandex", "Яндекс Браузер"),
     ];
-    for (k, v) in KNOWN {
-        if l.contains(k) {
-            return (*v).to_string();
-        }
+    KNOWN.iter().find(|(k, _)| l.contains(k)).map(|(_, v)| (*v).to_string())
+}
+
+/// "Publisher.Dotify_8wekyb3d8bbwe!App", "com.squirrel.Dotify.Dotify",
+/// "C:\\…\\Dotify.exe" → "Dotify".
+fn app_name_from_id(id: &str) -> String {
+    const GENERIC: &[&str] = &[
+        "app", "application", "desktop", "client", "player", "music", "win", "windows", "win32", "x64", "exe",
+        "electron", "squirrel", "com", "org", "net", "io", "dev", "ru", "app_id", "main",
+    ];
+    let file = id.rsplit(['\\', '/']).next().unwrap_or(id);
+    let file = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".EXE")).unwrap_or(file);
+    let useful = |p: &&str| {
+        !p.is_empty() && !GENERIC.contains(&p.to_lowercase().as_str()) && !p.chars().all(|c| c.is_ascii_hexdigit())
+    };
+    // after '!' Store apps put the entry point ("App"); the package name is before it
+    let mut parts: Vec<&str> = Vec::new();
+    for half in file.split('!').rev() {
+        // drop the publisher hash of a package family name
+        let half = half.split('_').next().unwrap_or(half);
+        parts.extend(half.rsplit(['.', ' ']));
     }
-    let tail = id.rsplit('!').next().unwrap_or(id);
-    let tail = tail.trim_end_matches(".exe").trim_end_matches(".EXE");
-    let tail = tail.rsplit('.').next().unwrap_or(tail);
-    if tail.is_empty() || tail.chars().all(|c| c.is_ascii_hexdigit()) {
-        return "Плеер".into();
-    }
-    let mut c = tail.chars();
+    let Some(best) = parts.iter().find(|p| useful(p)) else { return "Плеер".into() };
+    // "12345Publisher" style prefixes
+    let best = best.trim_start_matches(|c: char| c.is_ascii_digit());
+    let mut c = best.chars();
     match c.next() {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => "Плеер".into(),
@@ -577,7 +609,7 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
                     }
                 }
                 let payload = state.map(|s| MediaPayload {
-                    app: media_app_name(&s.app_id),
+                    app: media_app_name(&shared, &s.app_id),
                     app_id: s.app_id,
                     title: s.title,
                     artist: s.artist,
@@ -2159,7 +2191,7 @@ fn yt_eval(app: &AppHandle, js: &str) {
 /// next/previous move Yandex Music's queue (which then hands the track over again).
 fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) {
     if cmd.action == "dump" {
-        let ok = clip::write_text(&media.dump());
+        let ok = clip::write_text(&media.dump(|id| media_app_name(shared, id)));
         toast(
             app,
             ToastPayload {

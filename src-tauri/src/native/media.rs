@@ -7,7 +7,10 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager as Manager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
-use windows::Storage::Streams::DataReader;
+use windows::Graphics::Imaging::{
+    BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode,
+};
+use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
 
 /// 100ns ticks between 1601-01-01 and 1970-01-01.
 const EPOCH_DIFF: i64 = 116_444_736_000_000_000;
@@ -53,6 +56,47 @@ fn status_of(s: &Session) -> Option<Status> {
 
 fn app_of(s: &Session) -> String {
     s.SourceAppUserModelId().map(|h| h.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// Image type by its first bytes; players' ContentType is often empty or wrong.
+fn sniff(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(&[0x89, b'P', b'N', b'G']) {
+        Some("image/png")
+    } else if b.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if b.starts_with(b"GIF8") {
+        Some("image/gif")
+    } else if b.len() > 12 && b.starts_with(b"RIFF") && &b[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if b.starts_with(b"BM") {
+        Some("image/bmp")
+    } else {
+        None
+    }
+}
+
+fn transcode(stream: &IRandomAccessStreamWithContentType) -> Option<Vec<u8>> {
+    stream.Seek(0).ok()?;
+    let dec = BitmapDecoder::CreateAsync(stream).ok()?.join().ok()?;
+    let (w, h) = (dec.OrientedPixelWidth().ok()?, dec.OrientedPixelHeight().ok()?);
+    let px = dec
+        .GetPixelDataTransformedAsync(
+            BitmapPixelFormat::Rgba8,
+            BitmapAlphaMode::Straight,
+            &BitmapTransform::new().ok()?,
+            ExifOrientationMode::RespectExifOrientation,
+            ColorManagementMode::DoNotColorManage,
+        )
+        .ok()?
+        .join()
+        .ok()?
+        .DetachPixelData()
+        .ok()?;
+    if w == 0 || h == 0 || px.len() != (w * h * 4) as usize {
+        return None;
+    }
+    let (w, h, px) = super::img::shrink(w, h, &px, 512);
+    super::img::encode_png(w, h, &px)
 }
 
 impl Media {
@@ -127,7 +171,7 @@ impl Media {
     }
 
     /// Every session as Windows reports it, for the tray's diagnostics item.
-    pub fn dump(&self) -> String {
+    pub fn dump(&self, name: impl Fn(&str) -> String) -> String {
         let current = self.manager.GetCurrentSession().ok().map(|s| app_of(&s));
         let mut out = String::new();
         let Ok(list) = self.manager.GetSessions() else { return "GetSessions: ошибка".into() };
@@ -152,7 +196,7 @@ impl Media {
                 ),
                 Err(e) => (format!("<ошибка {e}>"), String::new()),
             };
-            out.push_str(&format!("{id} | {status} | {artist} — {title}\n"));
+            out.push_str(&format!("{id} [{}] | {status} | {artist} — {title}\n", name(&id)));
         }
         out
     }
@@ -268,18 +312,26 @@ impl Media {
         if size == 0 || size > 8 * 1024 * 1024 {
             return None;
         }
-        let mime = stream
-            .ContentType()
-            .map(|h| h.to_string_lossy())
-            .ok()
-            .filter(|m| m.starts_with("image/"))
-            .unwrap_or_else(|| "image/png".into());
         let input = stream.GetInputStreamAt(0).ok()?;
         let reader = DataReader::CreateDataReader(&input).ok()?;
-        let loaded = reader.LoadAsync(size).ok()?.join().ok()?;
-        let mut bytes = vec![0u8; loaded as usize];
-        reader.ReadBytes(&mut bytes).ok()?;
-        Some(Thumb { mime, bytes })
+        // streams from some players (Dotify, Electron) arrive in pieces
+        let mut bytes = Vec::with_capacity(size as usize);
+        while (bytes.len() as u32) < size {
+            let got = reader.LoadAsync(size - bytes.len() as u32).ok()?.join().ok()?;
+            if got == 0 {
+                break;
+            }
+            let mut chunk = vec![0u8; got as usize];
+            reader.ReadBytes(&mut chunk).ok()?;
+            bytes.extend_from_slice(&chunk);
+        }
+        if let Some(mime) = sniff(&bytes) {
+            return Some(Thumb { mime: mime.into(), bytes });
+        }
+        // a format WebView2 can't show, or a declared type that lies:
+        // let Windows decode it and hand over PNG
+        let png = transcode(&stream)?;
+        Some(Thumb { mime: "image/png".into(), bytes: png })
     }
 
     pub fn control(&self, action: &str, value: f64) -> Result<()> {

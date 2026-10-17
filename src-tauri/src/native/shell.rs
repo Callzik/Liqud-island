@@ -66,6 +66,35 @@ pub fn list_apps() -> Result<Vec<AppEntry>> {
     }
 }
 
+/// Name of an app as Start shows it, by its AUMID (media sessions report
+/// only that). Desktop apps without an AUMID report their exe name or path;
+/// those are matched against the Start-menu shortcuts' targets.
+pub fn app_display_name(aumid: &str) -> Option<String> {
+    let name_of = |parsing: &str| unsafe {
+        let w = wide(parsing);
+        let item: IShellItem = SHCreateItemFromParsingName(pcwstr(&w), None::<&IBindCtx>).ok()?;
+        let n = item.GetDisplayName(SIGDN_NORMALDISPLAY).map(take_pwstr).ok()?;
+        (!n.trim().is_empty()).then(|| n.trim().to_string())
+    };
+    if !aumid.contains('\\') {
+        if let Some(n) = name_of(&format!("shell:AppsFolder\\{aumid}")) {
+            // an unknown id may come back as itself
+            if !n.eq_ignore_ascii_case(aumid) {
+                return Some(n);
+            }
+        }
+    }
+    let exe = aumid.rsplit(['\\', '/']).next().unwrap_or(aumid).to_lowercase();
+    if !exe.ends_with(".exe") {
+        return None;
+    }
+    list_apps()
+        .ok()?
+        .into_iter()
+        .find(|a| a.id.to_lowercase().rsplit(['\\', '/']).next() == Some(exe.as_str()))
+        .map(|a| a.name)
+}
+
 /// `target` is either `app:<parsing name>` or a filesystem path.
 fn parsing_name(target: &str) -> String {
     match target.strip_prefix("app:") {
