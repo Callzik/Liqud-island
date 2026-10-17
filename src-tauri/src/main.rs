@@ -5,6 +5,7 @@ mod ai;
 mod clips;
 mod record;
 mod downloads;
+mod log;
 mod native;
 mod store;
 mod update;
@@ -280,6 +281,7 @@ fn toast(app: &AppHandle, t: ToastPayload) {
 }
 
 fn toast_error(app: &AppHandle, title: &str, subtitle: &str) {
+    log::error(&format!("{title}: {subtitle}"));
     toast(
         app,
         ToastPayload {
@@ -554,10 +556,17 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
         .name("media".into())
         .spawn(move || {
             let _com = util::Com::mta();
+            let mut logged = false;
             let media = loop {
                 match Media::new() {
                     Ok(m) => break m,
-                    Err(_) => thread::sleep(Duration::from_secs(5)),
+                    Err(e) => {
+                        if !logged {
+                            logged = true;
+                            log::error(&format!("медиасессии недоступны: {e}"));
+                        }
+                        thread::sleep(Duration::from_secs(5))
+                    }
                 }
             };
             let mut last: Option<MediaPayload> = None;
@@ -656,10 +665,17 @@ fn spawn_audio_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<AudioCmd
         .name("audio".into())
         .spawn(move || {
             let _com = util::Com::mta();
+            let mut logged = false;
             let mut audio = loop {
                 match Audio::new() {
                     Ok(a) => break a,
-                    Err(_) => thread::sleep(Duration::from_secs(5)),
+                    Err(e) => {
+                        if !logged {
+                            logged = true;
+                            log::error(&format!("звук недоступен: {e}"));
+                        }
+                        thread::sleep(Duration::from_secs(5))
+                    }
                 }
             };
             publish_volume(&app, &shared, &audio);
@@ -1510,6 +1526,15 @@ fn finish_recording_before_exit(app: &AppHandle) {
             let _ = rec.finish();
         }
     }
+}
+
+/// Front-end errors (window.onerror, unhandled rejections) go to the journal too.
+#[tauri::command]
+fn log_js(level: String, message: String) {
+    let level = if level == "warn" { "WARN" } else { "ERROR" };
+    let mut m: String = message.chars().take(2000).collect();
+    m.insert_str(0, "js: ");
+    log::write(level, &m);
 }
 
 #[tauri::command]
@@ -2612,6 +2637,7 @@ async fn update_check(app: AppHandle, manual: bool) {
             },
         ),
         Err(e) if manual => toast_error(&app, "Не удалось проверить обновления", &e),
+        Err(e) => log::warn(&format!("проверка обновлений: {e}")),
         _ => {}
     }
 }
@@ -2668,9 +2694,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let dump = MenuItem::with_id(app, "media-dump", "Скопировать медиасессии", true, None::<&str>)?;
     let upd = MenuItem::with_id(app, "update", "Проверить обновления", true, None::<&str>)?;
+    let journal = MenuItem::with_id(app, "log-open", "Открыть журнал ошибок", true, None::<&str>)?;
+    let journal_copy = MenuItem::with_id(app, "log-copy", "Скопировать журнал", true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "restart", "Перезапустить", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &launcher, &settings, &sep, &dump, &upd, &restart, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &launcher, &settings, &sep, &dump, &upd, &journal, &journal_copy, &restart, &quit])?;
     let mut builder = TrayIconBuilder::with_id("island")
         .tooltip("Island")
         .menu(&menu)
@@ -2690,6 +2718,28 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "update" => {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move { update_check(app, true).await });
+            }
+            "log-open" => {
+                if let Some(p) = log::path() {
+                    let p = p.to_string_lossy().into_owned();
+                    let st = app.state::<Arc<Shared>>().inner().clone();
+                    thread::spawn(move || st.shell.run(move || shell::open(&p)));
+                }
+            }
+            "log-copy" => {
+                let app = app.clone();
+                thread::spawn(move || {
+                    let text = log::tail(64 * 1024);
+                    let ok = !text.is_empty() && clip::write_text(&text);
+                    toast(
+                        &app,
+                        ToastPayload {
+                            icon: "copy".into(),
+                            title: if ok { "Журнал скопирован".into() } else { "Журнал пуст".into() },
+                            ..Default::default()
+                        },
+                    );
+                });
             }
             "restart" => {
                 finish_recording_before_exit(app);
@@ -2745,6 +2795,7 @@ fn main() {
         })
         .setup(|app| {
             let paths = Paths::new(app.path().app_data_dir()?);
+            log::init(&paths.dir);
             let first_run = !paths.settings().exists();
             let settings: Settings = load_json(&paths.settings());
             let data: Data = load_json(&paths.data());
@@ -2799,6 +2850,7 @@ fn main() {
             }
             let errors = apply_hotkeys(app.handle(), &shared, &settings);
             if !errors.is_empty() {
+                log::warn(&format!("хоткеи: {}", errors.join(", ")));
                 *lock(&shared.hotkey_error) = Some(errors.join(", "));
             }
 
@@ -2888,6 +2940,7 @@ fn main() {
             update_check,
             update_install,
             update_skip,
+            log_js,
             quit
         ])
         .run(tauri::generate_context!())
