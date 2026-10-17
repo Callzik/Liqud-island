@@ -211,6 +211,9 @@ struct Shared {
     yt_active: AtomicBool,
     /// track that could not be found on YouTube: Yandex plays it itself
     yt_failed: Mutex<String>,
+    /// latest glass backdrop (id, BMP) for the backdrop:// protocol
+    backdrop: Mutex<Option<(u32, Arc<Vec<u8>>)>>,
+    backdrop_seq: AtomicU32,
 }
 
 #[derive(Serialize, Clone)]
@@ -496,10 +499,13 @@ fn spawn_cursor_thread(app: AppHandle, shared: Arc<Shared>) {
             let mut input_on = false;
             let mut last: Option<(i32, i32, bool, bool)> = None;
             let mut was_near = false;
-            let mut tick: u64 = 0;
+            let mut last_fg_check = Instant::now();
+            let mut last_place = Instant::now();
+            // 60 fps only while the cursor is around the island; far away a slower
+            // poll is enough (the "near" zone is wide enough to switch back in time)
+            let mut pause = 16u64;
             loop {
-                thread::sleep(Duration::from_millis(16));
-                tick += 1;
+                thread::sleep(Duration::from_millis(pause));
                 let geom = *lock(&shared.geom);
                 if geom.scale <= 0.0 {
                     continue;
@@ -527,8 +533,10 @@ fn spawn_cursor_thread(app: AppHandle, shared: Arc<Shared>) {
                     }
                 }
                 was_near = near;
+                pause = if near || input_on { 16 } else { 64 };
 
-                if tick % 15 == 0 {
+                if last_fg_check.elapsed() >= Duration::from_millis(240) {
+                    last_fg_check = Instant::now();
                     let own = shared.own_hwnd.load(Ordering::Relaxed);
                     let fg = input::foreground();
                     // remember the user's window, never one of ours (the capture
@@ -542,7 +550,8 @@ fn spawn_cursor_thread(app: AppHandle, shared: Arc<Shared>) {
                         let _ = app.emit("suppressed", hide);
                     }
                 }
-                if tick % 150 == 0 {
+                if last_place.elapsed() >= Duration::from_millis(2400) {
+                    last_place = Instant::now();
                     place_window(&win, &shared, false);
                 }
             }
@@ -1595,7 +1604,8 @@ struct Backdrop {
     y: f64,
     w: f64,
     h: f64,
-    url: String,
+    /// served as http://backdrop.localhost/<id> (an uncompressed BMP)
+    id: u32,
 }
 
 /// Glass look: a small, downscaled copy of the screen behind the island, a few
@@ -1618,7 +1628,10 @@ fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
                     thread::sleep(Duration::from_millis(400));
                     continue;
                 }
-                thread::sleep(Duration::from_millis(140));
+                let hit = *lock(&shared.hit);
+                // the collapsed island is small and barely moves: fewer snapshots
+                let pause = if hit.h > 60.0 { 140 } else { 320 };
+                thread::sleep(Duration::from_millis(pause));
                 let geom = *lock(&shared.geom);
                 let hit = *lock(&shared.hit);
                 if geom.scale <= 0.0 || hit.w <= 0.0 {
@@ -1634,10 +1647,9 @@ fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
                 if pw < 4 || ph < 4 {
                     continue;
                 }
-                let Some(bgra) = capture::grab(px, py, pw, ph) else { continue };
-                let rgba = capture::bgra_to_rgba(&bgra);
-                // it gets blurred anyway: a quarter-size image is plenty
-                let (sw, sh, small) = img::shrink(pw, ph, &rgba, 240);
+                // it gets blurred anyway: a small image is plenty; GDI shrinks it
+                // while copying, and it goes out as a BMP (no PNG encoding, no base64)
+                let Some((sw, sh, small)) = capture::grab_scaled(px, py, pw, ph, 240) else { continue };
                 let hash = {
                     use std::hash::{Hash, Hasher};
                     let mut hs = std::collections::hash_map::DefaultHasher::new();
@@ -1649,7 +1661,8 @@ fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
                     continue;
                 }
                 last_hash = hash;
-                let Some(png) = img::encode_png(sw, sh, &small) else { continue };
+                let id = shared.backdrop_seq.fetch_add(1, Ordering::Relaxed) + 1;
+                *lock(&shared.backdrop) = Some((id, Arc::new(capture::bmp(&small, sw, sh))));
                 let _ = app.emit_to(
                     EventTarget::webview_window("main"),
                     "backdrop",
@@ -1658,7 +1671,7 @@ fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
                         y,
                         w,
                         h,
-                        url: util::data_url("image/png", &png),
+                        id,
                     },
                 );
             }
@@ -2793,6 +2806,24 @@ fn main() {
             }
             .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
         })
+        // http://backdrop.localhost/<id> — the screen under the island for the glass
+        .register_uri_scheme_protocol("backdrop", |ctx, req| {
+            let shared = ctx.app_handle().state::<Arc<Shared>>();
+            let want: u32 = req.uri().path().trim_matches('/').parse().unwrap_or(0);
+            // a slightly older id is fine too: the newest picture is always what we want
+            let body = lock(&shared.backdrop)
+                .as_ref()
+                .filter(|(id, _)| *id >= want)
+                .map(|(_, b)| b.as_ref().clone());
+            let builder = tauri::http::Response::builder()
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Cache-Control", "no-store");
+            match body {
+                Some(b) => builder.header("Content-Type", "image/bmp").body(b),
+                None => builder.status(404).body(Vec::new()),
+            }
+            .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+        })
         .setup(|app| {
             let paths = Paths::new(app.path().app_data_dir()?);
             log::init(&paths.dir);
@@ -2841,6 +2872,8 @@ fn main() {
                 ym: Mutex::new(ym::Cache::default()),
                 yt_active: AtomicBool::new(false),
                 yt_failed: Mutex::new(String::new()),
+                backdrop: Mutex::new(None),
+                backdrop_seq: AtomicU32::new(0),
             });
             app.manage(shared.clone());
 

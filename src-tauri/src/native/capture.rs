@@ -11,8 +11,8 @@ use windows::Storage::Streams::DataWriter;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetMonitorInfoW, MonitorFromPoint,
-    ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST, SRCCOPY,
+    ReleaseDC, SelectObject, SetBrushOrgEx, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    CAPTUREBLT, DIB_RGB_COLORS, HALFTONE, MONITORINFO, MONITOR_DEFAULTTONEAREST, SRCCOPY,
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::Shell::{FOLDERID_Downloads, FOLDERID_Pictures, FOLDERID_Videos, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
@@ -48,6 +48,60 @@ pub fn videos_dir() -> Option<std::path::PathBuf> {
     let dir = std::path::PathBuf::from(take_pwstr(v)).join("Island");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
+}
+
+/// Copies a screen rectangle already shrunk so its longest side is at most
+/// `max` (GDI scales it while copying: no full-size copy). Plain SRCCOPY, no
+/// CAPTUREBLT: that one makes the cursor flicker and is much slower, and the
+/// composited desktop already has layered windows in it. Top-down BGRA.
+pub fn grab_scaled(x: i32, y: i32, w: u32, h: u32, max: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let longest = w.max(h).max(1);
+    let (sw, sh) = if longest <= max {
+        (w, h)
+    } else {
+        let k = max as f32 / longest as f32;
+        (((w as f32 * k).round() as u32).max(1), ((h as f32 * k).round() as u32).max(1))
+    };
+    unsafe {
+        let screen = GetDC(None);
+        if screen.is_invalid() {
+            return None;
+        }
+        let mem = CreateCompatibleDC(Some(screen));
+        let bi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: sw as i32,
+                biHeight: -(sh as i32), // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let out = match CreateDIBSection(Some(mem), &bi, DIB_RGB_COLORS, &mut bits, None, 0) {
+            Ok(bmp) if !bits.is_null() => {
+                let old = SelectObject(mem, bmp.into());
+                SetStretchBltMode(mem, HALFTONE);
+                let _ = SetBrushOrgEx(mem, 0, 0, None);
+                let ok = StretchBlt(mem, 0, 0, sw as i32, sh as i32, Some(screen), x, y, w as i32, h as i32, SRCCOPY).as_bool();
+                let px = if ok {
+                    Some((sw, sh, std::slice::from_raw_parts(bits as *const u8, (sw * sh * 4) as usize).to_vec()))
+                } else {
+                    None
+                };
+                SelectObject(mem, old);
+                let _ = DeleteObject(bmp.into());
+                px
+            }
+            _ => None,
+        };
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+        out
+    }
 }
 
 /// Copies a screen rectangle; returns top-down BGRA pixels.

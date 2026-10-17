@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   call,
   on,
@@ -457,10 +458,11 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(on<Settings>("settings", setSettings));
     subs.push(
-      on<{ x: number; y: number; w: number; h: number; url: string }>("backdrop", (b) => {
+      on<{ x: number; y: number; w: number; h: number; id?: number; url?: string }>("backdrop", (b) => {
         const img = new Image();
+        img.crossOrigin = "anonymous";
         img.onload = () => liquidRef.current?.setBackdrop(img, b.x, b.y, b.w, b.h);
-        img.src = b.url;
+        img.src = b.url ?? convertFileSrc(String(b.id ?? 0), "backdrop");
       }),
     );
     subs.push(on<VoiceState>("voice", setVoice));
