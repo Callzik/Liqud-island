@@ -11,6 +11,7 @@ export interface Settings {
   hotkey: string;
   autostart: boolean;
   musicReactive: boolean;
+  coverTint: boolean;
   hideFullscreen: boolean;
   hoverExpand: boolean;
   clipLimit: number;

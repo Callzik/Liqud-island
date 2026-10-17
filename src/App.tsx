@@ -269,13 +269,17 @@ export default function App({ boot }: { boot: InitPayload }) {
       wave: settings.musicReactive && music && (mode === "music" || mode === "peek"),
       bars: music && (mode === "music" || mode === "peek"),
       rim: rimFor(),
+      tint:
+        settings.coverTint && music && cover.url
+          ? [accent[0], accent[1], accent[2], mode === "music" || mode === "peek" ? 0.32 : mode === "panel" || mode === "launcher" ? 0.14 : 0]
+          : undefined,
       shadow: mode === "panel" || mode === "launcher" || mode === "drop",
     });
     const pad = mode === "drop" ? 24 : mode === "panel" || mode === "launcher" ? 10 : 6;
     const rect = box.w > 0 ? { x: liquid.centerX - box.w / 2 - pad, y: 0, w: box.w + pad * 2, h: box.h + pad } : { x: 0, y: 0, w: 0, h: 0 };
     (window as any).__islandHit = rect;
     call("set_hit", { rect }).catch(() => {});
-  }, [mode, box.w, box.h, box.r, accent, media?.playing, settings.cursorPull, settings.musicReactive, toast?.tone]);
+  }, [mode, box.w, box.h, box.r, accent, media?.playing, cover.url, settings.cursorPull, settings.musicReactive, settings.coverTint, toast?.tone]);
 
   // ---- accent from cover ---------------------------------------------------
   useEffect(() => {
@@ -451,6 +455,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     );
     subs.push(on<Cover>("cover", setCover));
     subs.push(on<number>("audio", (l) => liquidRef.current?.setAudio(l)));
+    subs.push(on<number[]>("spectrum", (b) => liquidRef.current?.setSpectrum(b)));
     subs.push(on<Volume>("volume", setVolume));
     subs.push(on<Clip[]>("clips", setClips));
     subs.push(on<boolean>("suppressed", setSuppressed));

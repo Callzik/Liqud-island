@@ -82,6 +82,8 @@ pub struct Settings {
     pub autostart: bool,
     /// Wave along the island edge follows the system audio level.
     pub music_reactive: bool,
+    /// The island body takes the album art's colour while music plays.
+    pub cover_tint: bool,
     /// Hide the island while a fullscreen app (game, video) is in front.
     pub hide_fullscreen: bool,
     /// Expand the island when the cursor rests on it.
@@ -140,6 +142,7 @@ impl Default for Settings {
             hotkey: "Alt+Space".into(),
             autostart: true,
             music_reactive: true,
+            cover_tint: true,
             hide_fullscreen: true,
             hover_expand: true,
             clip_limit: 200,

@@ -26,6 +26,7 @@ const state = {
     hotkey: "Alt+Space",
     autostart: true,
     musicReactive: true,
+    coverTint: true,
     hideFullscreen: true,
     hoverExpand: true,
     clipLimit: 200,
@@ -361,6 +362,8 @@ if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ === und
     if (!state.media.playing) return;
     const beat = Math.abs(Math.sin(t * 3.1)) * 0.55 + Math.random() * 0.35;
     mockEmit("audio", Math.min(1, beat));
+    // bass kicks on the beat, the rest wanders
+    mockEmit("spectrum", [0.35 + beat * 0.6, 0.3 + Math.random() * 0.4, 0.25 + Math.abs(Math.sin(t * 1.7)) * 0.45, 0.15 + Math.random() * 0.35]);
   }, 50);
   // demo download: window.__mock.download()
   const download = () => {

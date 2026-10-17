@@ -15,6 +15,8 @@ export interface LiquidTarget {
   bars: boolean;
   /** rim colour along the bottom edge, rgba */
   rim: [number, number, number, number];
+  /** colour the body takes from the album art, rgba (alpha 0 = none) */
+  tint?: [number, number, number, number];
   /** soft drop shadow (expanded states) */
   shadow: boolean;
 }
@@ -74,6 +76,8 @@ export class Liquid {
   private bars = new Spring(0, 60, 14);
   private rim: [number, number, number, number] = [255, 255, 255, 0.12];
   private rimTarget: [number, number, number, number] = [255, 255, 255, 0.12];
+  private tint: [number, number, number, number] = [0, 0, 0, 0];
+  private tintTarget: [number, number, number, number] = [0, 0, 0, 0];
   private shadow = new Spring(0, 80, 18);
   /** glass look: the screen behind the island, blurred inside the shape */
   private glass = false;
@@ -83,6 +87,9 @@ export class Liquid {
   private level = 0;
   private levelTarget = 0;
   private barLevels = [0, 0, 0, 0];
+  /** real band levels from the speakers' loopback, and when they last came */
+  private bands = [0, 0, 0, 0];
+  private bandsAt = 0;
   private cursor: { x: number; y: number; inside: boolean } | null = null;
   private target: LiquidTarget = {
     w: 0,
@@ -144,6 +151,9 @@ export class Liquid {
     this.bars.target = t.bars ? 1 : 0;
     this.shadow.target = t.shadow ? 1 : 0;
     this.rimTarget = t.rim;
+    const tint = t.tint ?? [this.tint[0], this.tint[1], this.tint[2], 0];
+    // fading out keeps the old colour instead of sliding through grey
+    this.tintTarget = tint[3] > 0 ? tint : [this.tint[0], this.tint[1], this.tint[2], 0];
     this.kick();
   }
 
@@ -192,6 +202,12 @@ export class Liquid {
     ctx.fillRect(L - 2, 0, R - L + 4, H + 2);
   }
 
+  setSpectrum(bands: number[]) {
+    for (let i = 0; i < 4; i++) this.bands[i] = Math.max(0, Math.min(1, bands[i] ?? 0));
+    this.bandsAt = performance.now();
+    this.kick();
+  }
+
   setAudio(level: number) {
     // perceptual curve: quiet music still moves a little
     this.levelTarget = Math.min(1, Math.pow(Math.max(0, level), 0.6));
@@ -235,13 +251,22 @@ export class Liquid {
 
     const attack = this.levelTarget > this.level ? 0.5 : 0.1;
     this.level += (this.levelTarget - this.level) * attack;
+    const real = now - this.bandsAt < 400;
     for (let i = 0; i < 4; i++) {
-      const wobble = 0.55 + 0.45 * Math.sin(this.t * (5.3 + i * 1.7) + i * 1.9);
-      const goal = this.level * wobble;
-      this.barLevels[i] += (goal - this.barLevels[i]) * 0.35;
+      let goal: number;
+      if (real) {
+        // bass on the left, treble on the right
+        goal = this.bands[i];
+      } else {
+        const wobble = 0.55 + 0.45 * Math.sin(this.t * (5.3 + i * 1.7) + i * 1.9);
+        goal = this.level * wobble;
+      }
+      const k = goal > this.barLevels[i] ? 0.45 : 0.18;
+      this.barLevels[i] += (goal - this.barLevels[i]) * k;
     }
     for (let i = 0; i < 4; i++) {
       this.rim[i] += (this.rimTarget[i] - this.rim[i]) * (i === 3 ? 0.12 : 0.15);
+      this.tint[i] += (this.tintTarget[i] - this.tint[i]) * (i === 3 ? 0.08 : 0.1);
     }
     this.stepDrops(dt);
     this.draw();
@@ -259,6 +284,7 @@ export class Liquid {
       this.drops.length > 0 ||
       Math.abs(this.levelTarget - this.level) > 0.002 ||
       this.rim.some((v, i) => Math.abs(v - this.rimTarget[i]) > 0.5 * (i === 3 ? 0.01 : 1)) ||
+      this.tint.some((v, i) => Math.abs(v - this.tintTarget[i]) > 0.5 * (i === 3 ? 0.005 : 1)) ||
       this.wave.value > 0.01 ||
       this.bars.value > 0.01;
     if (animating) this.raf = requestAnimationFrame(this.tick);
@@ -393,6 +419,23 @@ export class Liquid {
       ctx.lineWidth = 2;
       ctx.strokeStyle = "rgba(255,255,255,0.22)";
       ctx.stroke();
+      ctx.restore();
+    }
+
+    // the album art's colour soaking into the body, strongest by the cover
+    const [tr, tg, tb, ta] = this.tint;
+    if (ta > 0.005) {
+      ctx.save();
+      this.shapePath(ctx, L, R, H, rr, f);
+      ctx.clip();
+      const cx = L + Math.min(H * 0.6, 48);
+      const g = ctx.createRadialGradient(cx, H * 0.5, 0, cx, H * 0.5, Math.max(120, W * 0.75));
+      const c = `${tr | 0},${tg | 0},${tb | 0}`;
+      g.addColorStop(0, `rgba(${c},${ta})`);
+      g.addColorStop(0.5, `rgba(${c},${ta * 0.4})`);
+      g.addColorStop(1, `rgba(${c},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(L - 2, 0, R - L + 4, H + 2);
       ctx.restore();
     }
 

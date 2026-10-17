@@ -7,6 +7,7 @@ mod record;
 mod downloads;
 mod log;
 mod native;
+mod spectrum;
 mod store;
 mod update;
 mod voice;
@@ -688,6 +689,8 @@ fn spawn_audio_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<AudioCmd
                 }
             };
             publish_volume(&app, &shared, &audio);
+            let spectrum = spectrum::Spectrum::spawn();
+            let mut last_bands = [0.0f32; spectrum::BANDS];
             let mut last_peak = -1.0f32;
             let mut last_volume_poll = Instant::now();
             let mut last_device_check = Instant::now();
@@ -717,11 +720,19 @@ fn spawn_audio_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<AudioCmd
                 let active = shared.media_playing.load(Ordering::Relaxed)
                     && !shared.suppressed.load(Ordering::Relaxed)
                     && lock(&shared.settings).music_reactive;
+                spectrum.set_active(active);
                 if active {
                     let p = audio.peak();
                     if (p - last_peak).abs() > 0.004 {
                         last_peak = p;
                         let _ = app.emit("audio", p);
+                    }
+                    // real bands for the equalizer bars (none: the bars follow the peak)
+                    if let Some(b) = spectrum.bands() {
+                        if b.iter().zip(&last_bands).any(|(x, y)| (x - y).abs() > 0.01) {
+                            last_bands = b;
+                            let _ = app.emit("spectrum", b);
+                        }
                     }
                     thread::sleep(Duration::from_millis(33));
                 } else {
