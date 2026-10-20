@@ -265,7 +265,7 @@ function AgentsSettings({ settings, set }: { settings: Settings; set: <K extends
       <div className="setting">
         <div>
           <div className="setting-title">Claude Code и Codex в острове</div>
-          <div className="setting-sub">Вкладки «Агенты» и «Офис», плашка «Нужен ответ»</div>
+          <div className="setting-sub">Терминал, приложения Claude и Codex, VS Code · вкладки «Агенты» и «Офис»</div>
         </div>
         <Toggle checked={settings.agentsEnabled} onChange={(v) => set("agentsEnabled", v)} />
       </div>
@@ -284,8 +284,8 @@ function AgentsSettings({ settings, set }: { settings: Settings; set: <K extends
           <div className="setting-sub">
             {err ||
               (hooks?.installed
-                ? `Хуки в ${hooks.settingsPath}. Разрешения и вопросы ждут ответа в острове 2 минуты, потом — в терминале`
-                : "Добавит хуки в ~/.claude/settings.json (копия файла сохранится рядом). Codex виден без настройки")}
+                ? `Хуки в ${hooks.settingsPath}: терминал, приложение Claude, VS Code. Разрешения и вопросы ждут ответа в острове 2 минуты`
+                : "Чтобы отвечать из острова: хуки в ~/.claude/settings.json (копия файла рядом). Без них сессии только видны")}
           </div>
         </div>
         {hooks?.installed && !hooks.stale ? (

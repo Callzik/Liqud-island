@@ -11,18 +11,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::util::hwnd;
 
-/// This process's parents, nearest first (bash → claude → shell → terminal / editor).
-pub fn ancestors() -> Vec<u32> {
-    let mut parent = std::collections::HashMap::new();
+/// Every process: (pid, parent pid, exe file name).
+fn processes() -> Vec<(u32, u32, String)> {
+    let mut out = Vec::new();
     unsafe {
-        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return Vec::new() };
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
         let mut e = PROCESSENTRY32W {
             dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
             ..Default::default()
         };
         if Process32FirstW(snap, &mut e).is_ok() {
             loop {
-                parent.insert(e.th32ProcessID, e.th32ParentProcessID);
+                let n = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+                out.push((e.th32ProcessID, e.th32ParentProcessID, String::from_utf16_lossy(&e.szExeFile[..n])));
                 if Process32NextW(snap, &mut e).is_err() {
                     break;
                 }
@@ -30,6 +31,12 @@ pub fn ancestors() -> Vec<u32> {
         }
         let _ = CloseHandle(snap);
     }
+    out
+}
+
+/// This process's parents, nearest first (bash → claude → shell → terminal / app).
+pub fn ancestors() -> Vec<u32> {
+    let parent: std::collections::HashMap<u32, u32> = processes().into_iter().map(|(p, pp, _)| (p, pp)).collect();
     let mut out = Vec::new();
     let mut pid = std::process::id();
     while let Some(&p) = parent.get(&pid) {
@@ -40,6 +47,15 @@ pub fn ancestors() -> Vec<u32> {
         pid = p;
     }
     out
+}
+
+/// Running processes with one of these exe names (lowercase, e.g. "code.exe").
+pub fn pids_by_exe(names: &[&str]) -> Vec<u32> {
+    processes()
+        .into_iter()
+        .filter(|(_, _, n)| names.contains(&n.to_lowercase().as_str()))
+        .map(|(p, _, _)| p)
+        .collect()
 }
 
 /// Process that owns a window (for a console window: the shell running in it).

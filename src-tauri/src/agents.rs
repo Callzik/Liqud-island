@@ -6,7 +6,9 @@
 //! localhost socket. For a permission request or a question (AskUserQuestion)
 //! the hook waits until the answer is given in the island, or the time runs out
 //! and the terminal asks as usual.
-//! Codex is only watched: its session logs (~/.codex/sessions/…/rollout-*.jsonl).
+//! Sessions also come from the transcripts themselves (~/.claude/projects,
+//! ~/.codex/sessions), so Claude Code in the Claude app, VS Code or Cursor shows
+//! up even where hooks don't run; answering needs the hooks.
 
 use std::collections::HashMap;
 use std::fs;
@@ -90,8 +92,13 @@ pub struct Session {
     pub updated_ms: i64,
     pub actions: u32,
     pub request: Option<Request>,
+    /// where it runs: "desktop" (Claude / Codex app) | "vscode" | "cursor" | "windsurf" | "jetbrains" | "terminal"
+    pub client: String,
     #[serde(skip)]
     pids: Vec<u32>,
+    /// last hook event: hooks know better than the transcript
+    #[serde(skip)]
+    hooked_ms: i64,
     #[serde(skip)]
     transcript: String,
 }
@@ -122,7 +129,7 @@ enum Reply {
     Deny(String),
     /// answer to AskUserQuestion, already worded for Claude
     Answer(String),
-    /// let the terminal ask as usual
+    /// let the terminal / app ask as usual
     Pass,
 }
 
@@ -183,9 +190,9 @@ pub fn start(app: AppHandle, dir: PathBuf) {
         })
         .expect("failed to start agents thread");
     thread::Builder::new()
-        .name("codex".into())
-        .spawn(codex_loop)
-        .expect("failed to start codex thread");
+        .name("agents-watch".into())
+        .spawn(watch_loop)
+        .expect("failed to start agents watch thread");
 }
 
 pub fn snapshot() -> Payload {
@@ -223,17 +230,90 @@ pub fn answer(session: &str, request: &str, decision: &str, text: Option<String>
 /// Brings the session's terminal / editor window to the front.
 pub fn focus(session: &str) -> bool {
     let Some(h) = hub() else { return false };
-    let (pids, cwd) = match lock(&h.sessions).get(session) {
-        Some(s) => (s.pids.clone(), s.cwd.clone()),
+    let (pids, cwd, client, source) = match lock(&h.sessions).get(session) {
+        Some(s) => (s.pids.clone(), s.cwd.clone(), s.client.clone(), s.source.clone()),
         None => return false,
     };
-    let target = proc::window_for_pids(&pids);
+    let mut target = proc::window_for_pids(&pids);
+    if target == 0 {
+        // known only from its transcript: the app it runs in
+        let exes: &[&str] = match (client.as_str(), source.as_str()) {
+            ("desktop", "codex") => &["codex.exe"],
+            ("desktop", _) => &["claude.exe"],
+            ("vscode", _) => &["code.exe", "code - insiders.exe"],
+            ("cursor", _) => &["cursor.exe"],
+            ("windsurf", _) => &["windsurf.exe"],
+            _ => &["windowsterminal.exe"],
+        };
+        target = proc::window_for_pids(&proc::pids_by_exe(exes));
+    }
     if target != 0 {
         crate::native::input::activate(target);
         return true;
     }
-    // nothing found (Codex is only watched): at least open the project folder
+    // nothing found: at least open the project folder
     !cwd.is_empty() && crate::native::shell::open(&cwd)
+}
+
+/// "в приложении" / "в VS Code" / "в терминале"
+fn place(client: &str) -> &'static str {
+    match client {
+        "desktop" => "в приложении",
+        "vscode" => "в VS Code",
+        "cursor" => "в Cursor",
+        "windsurf" => "в Windsurf",
+        "jetbrains" => "в IDE",
+        _ => "в терминале",
+    }
+}
+
+fn waiting_there(s: &mut Session) {
+    s.status = "waiting".into();
+    s.action = format!("Ждёт ответа {}", place(&s.client));
+}
+
+/// Where the hook's parents live: the Claude app, an editor or a terminal.
+fn client_of(pids: &[u32]) -> String {
+    let paths: Vec<String> = pids
+        .iter()
+        .filter_map(|p| crate::native::util::process_exe_path(*p))
+        .map(|p| p.to_lowercase().replace('/', "\\"))
+        .collect();
+    let stem = |p: &String| crate::native::util::exe_stem(p);
+    // the app's own Claude Code lives under its folder; the CLI is in .local\bin or npm
+    if paths.iter().any(|p| {
+        p.contains("anthropicclaude") || (p.contains("\\windowsapps\\") && p.contains("claude")) || p.contains("\\programs\\claude\\")
+    }) {
+        return "desktop".into();
+    }
+    for p in &paths {
+        match stem(p).as_str() {
+            "code" | "code - insiders" | "vscodium" => return "vscode".into(),
+            "cursor" => return "cursor".into(),
+            "windsurf" => return "windsurf".into(),
+            "idea64" | "pycharm64" | "webstorm64" | "rider64" | "goland64" | "clion64" | "phpstorm64" | "rustrover64" => {
+                return "jetbrains".into()
+            }
+            _ => {}
+        }
+    }
+    "terminal".into()
+}
+
+/// Claude Code's own entrypoint mark in transcripts, when it has one.
+fn client_from_entry(e: &str) -> Option<&'static str> {
+    let e = e.to_lowercase();
+    if e.is_empty() {
+        None
+    } else if e.contains("vscode") {
+        Some("vscode")
+    } else if e.contains("desktop") || e.contains("sdk") || e.contains("app") {
+        Some("desktop")
+    } else if e == "cli" {
+        Some("terminal")
+    } else {
+        None
+    }
 }
 
 fn rank(status: &str) -> u8 {
@@ -384,6 +464,7 @@ fn on_hook(msg: &Value) -> Option<(String, String, std::sync::mpsc::Receiver<Rep
             ..Default::default()
         });
         s.updated_ms = now;
+        s.hooked_ms = now;
         let cwd = str_of(ev, "cwd");
         if !cwd.is_empty() {
             s.cwd = cwd.to_string();
@@ -394,21 +475,21 @@ fn on_hook(msg: &Value) -> Option<(String, String, std::sync::mpsc::Receiver<Rep
         }
         if let Some(p) = msg.get("pids").and_then(Value::as_array) {
             let pids: Vec<u32> = p.iter().filter_map(|v| v.as_u64()).map(|v| v as u32).collect();
-            if !pids.is_empty() {
+            if !pids.is_empty() && pids != s.pids {
+                s.client = client_of(&pids);
                 s.pids = pids;
             }
         }
         let tool = str_of(ev, "tool_name").to_string();
         let input = ev.get("tool_input").cloned().unwrap_or(Value::Null);
-        // the user is looking at this very terminal: let it ask there, no waiting
+        // the user is looking at this very terminal / app: let it ask there, no waiting
         let in_front = {
             let fg = proc::window_pid(crate::native::input::foreground());
             fg != 0 && s.pids.contains(&fg)
         };
         match name.as_str() {
             "PermissionRequest" | "PreToolUse" if in_front && (name == "PermissionRequest" || tool == "AskUserQuestion") => {
-                s.status = "waiting".into();
-                s.action = "Ждёт ответа в терминале".into();
+                waiting_there(s);
                 s.request = None;
             }
             "SessionStart" => {
@@ -486,8 +567,7 @@ fn on_hook(msg: &Value) -> Option<(String, String, std::sync::mpsc::Receiver<Rep
                 let text = str_of(ev, "message");
                 // the terminal shows its own dialog (after the island's time ran out, or "В чате")
                 if s.request.is_none() && (kind == "permission_prompt" || kind == "elicitation_dialog" || text.contains("permission")) {
-                    s.status = "waiting".into();
-                    s.action = "Ждёт ответа в терминале".into();
+                    waiting_there(s);
                 }
             }
             "Stop" => {
@@ -565,10 +645,7 @@ fn close_request(msg: &Value, req_id: &str, reply: Option<&Reply>) {
                 s.status = "thinking".into();
                 s.action = "Получил ответ — работает".into();
             }
-            Some(Reply::Pass) => {
-                s.status = "waiting".into();
-                s.action = "Ждёт ответа в терминале".into();
-            }
+            Some(Reply::Pass) => waiting_there(s),
             None => {
                 s.status = "thinking".into();
                 s.action = "Думает…".into();
@@ -675,25 +752,32 @@ fn read_transcript(s: &mut Session) {
     }
 }
 
+/// The title a line sets: (title, set by the user).
+fn title_line(v: &Value) -> Option<(String, bool)> {
+    let (keys, custom): (&[&str], bool) = match str_of(v, "type") {
+        "custom-title" => (&["customTitle", "title"], true),
+        "ai-title" => (&["aiTitle", "title"], false),
+        "summary" => (&["summary"], false),
+        _ => return None,
+    };
+    keys.iter().map(|k| str_of(v, k)).find(|t| !t.is_empty()).map(|t| (short(t, 60), custom))
+}
+
+/// Session title: the user's name for it, else Claude's (latest), else the first prompt.
 fn title_from(head: &str) -> String {
     let mut first = String::new();
+    let mut named = String::new();
+    let mut custom = false;
     for line in head.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if let Some((t, c)) = title_line(&v) {
+            if c || !custom {
+                named = t;
+                custom |= c;
+            }
+            continue;
+        }
         match str_of(&v, "type") {
-            "summary" => {
-                let t = str_of(&v, "summary");
-                if !t.is_empty() {
-                    return short(t, 60);
-                }
-            }
-            "custom-title" | "ai-title" => {
-                for k in ["customTitle", "aiTitle", "title"] {
-                    let t = str_of(&v, k);
-                    if !t.is_empty() {
-                        return short(t, 60);
-                    }
-                }
-            }
             "user" if first.is_empty() => {
                 let c = v.get("message").and_then(|m| m.get("content"));
                 let text = match c {
@@ -712,7 +796,11 @@ fn title_from(head: &str) -> String {
             _ => {}
         }
     }
-    first
+    if named.is_empty() {
+        first
+    } else {
+        named
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -753,16 +841,20 @@ fn newest_dirs(p: &Path, n: usize) -> Vec<PathBuf> {
     v.into_iter().rev().take(n).collect()
 }
 
-fn codex_loop() {
-    let root = home().join(".codex").join("sessions");
-    let mut files: HashMap<PathBuf, CodexFile> = HashMap::new();
+fn watch_loop() {
+    let codex_root = home().join(".codex").join("sessions");
+    let claude_root = home().join(".claude").join("projects");
+    let mut codex: HashMap<PathBuf, CodexFile> = HashMap::new();
+    let mut claude: HashMap<PathBuf, ClaudeFile> = HashMap::new();
+    let mut dirs: HashMap<PathBuf, i64> = HashMap::new();
+    let mut tick = 0u32;
     loop {
         thread::sleep(Duration::from_secs(2));
         let now = now_ms();
         let mut changed = false;
-        if root.is_dir() {
+        if codex_root.is_dir() {
             let mut days = Vec::new();
-            for y in newest_dirs(&root, 2) {
+            for y in newest_dirs(&codex_root, 2) {
                 for m in newest_dirs(&y, 2) {
                     days.extend(newest_dirs(&m, 2));
                 }
@@ -778,19 +870,295 @@ fn codex_loop() {
                         continue;
                     }
                     let mt = mtime_ms(&p);
-                    if now - mt > 30 * 60 * 1000 && !files.contains_key(&p) {
+                    if now - mt > 30 * 60 * 1000 && !codex.contains_key(&p) {
                         continue;
                     }
-                    let f = files.entry(p.clone()).or_default();
+                    let f = codex.entry(p.clone()).or_default();
                     changed |= codex_read(&p, f, mt, now);
                 }
             }
         }
-        changed |= forget(now, &mut files);
+        // Claude Code (CLI, the Claude app, VS Code…): new transcripts every 10 s
+        // (only folders whose listing changed), known ones every 2 s
+        if tick % 5 == 0 && claude_root.is_dir() {
+            claude_discover(&claude_root, &mut claude, &mut dirs, now);
+        }
+        for (p, f) in claude.iter_mut() {
+            let mt = mtime_ms(p);
+            if mt != f.mtime || f.watch {
+                changed |= claude_read(p, f, mt, now);
+            }
+        }
+        changed |= forget(now, &mut codex, &mut claude);
+        tick = tick.wrapping_add(1);
         if changed {
             emit();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code transcripts (~/.claude/projects/<folder>/<session>.jsonl)
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct ClaudeFile {
+    offset: u64,
+    mtime: i64,
+    key: String,
+    /// the first read only catches up (no counters for old turns)
+    primed: bool,
+    /// last meaningful line: "prompt" | "text" | "tool" | "result" | "end"
+    last: String,
+    /// this Claude Code writes stop_reason: "end_turn" marks the end for sure
+    stop_seen: bool,
+    custom_title: bool,
+    tool: String,
+    tool_input: Value,
+    /// keep looking although nothing was written (timers below)
+    watch: bool,
+    finished: bool,
+}
+
+fn claude_discover(root: &Path, files: &mut HashMap<PathBuf, ClaudeFile>, dirs: &mut HashMap<PathBuf, i64>, now: i64) {
+    let Ok(rd) = fs::read_dir(root) else { return };
+    for d in rd.flatten() {
+        let dir = d.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let dm = mtime_ms(&dir);
+        if dirs.get(&dir) == Some(&dm) {
+            continue;
+        }
+        dirs.insert(dir.clone(), dm);
+        let Ok(list) = fs::read_dir(&dir) else { continue };
+        for e in list.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("jsonl") || files.contains_key(&p) {
+                continue;
+            }
+            if now - mtime_ms(&p) < 30 * 60 * 1000 {
+                files.insert(p, ClaudeFile::default());
+            }
+        }
+    }
+}
+
+const ASKS_PERMISSION: [&str; 7] = ["Bash", "PowerShell", "Edit", "MultiEdit", "Write", "NotebookEdit", "WebFetch"];
+
+/// Reads new lines of one transcript; true when the session changed.
+fn claude_read(p: &Path, f: &mut ClaudeFile, mtime: i64, now: i64) -> bool {
+    let Some(h) = hub() else { return false };
+    f.mtime = mtime;
+    let Ok(mut file) = fs::File::open(p) else { return false };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if len < f.offset {
+        f.offset = 0;
+    }
+    let mut title = String::new();
+    let mut skip_partial = false;
+    if !f.primed {
+        let mut head = vec![0u8; len.min(256 * 1024) as usize];
+        if file.read_exact(&mut head).is_ok() {
+            title = title_from(&String::from_utf8_lossy(&head));
+        }
+        // a long session: the end is enough to know where it stands
+        if len > 1024 * 1024 {
+            f.offset = len - 512 * 1024;
+            skip_partial = true;
+        }
+    }
+    let mut buf = Vec::new();
+    if len > f.offset && file.seek(SeekFrom::Start(f.offset)).is_ok() {
+        let _ = (&mut file).take(len - f.offset).read_to_end(&mut buf);
+    }
+    let upto = buf.iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
+    f.offset += upto as u64;
+    let mut text = String::from_utf8_lossy(&buf[..upto]).into_owned();
+    if skip_partial {
+        text = text.split_once('\n').map(|(_, rest)| rest.to_string()).unwrap_or_default();
+    }
+    let counting = f.primed;
+    f.primed = true;
+
+    let mut all = lock(&h.sessions);
+    let mut touched = false;
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let kind = str_of(&v, "type");
+        if f.key.is_empty() {
+            let sid = str_of(&v, "sessionId");
+            let sid = if sid.is_empty() { p.file_stem().and_then(|x| x.to_str()).unwrap_or("") } else { sid };
+            if sid.is_empty() {
+                continue;
+            }
+            f.key = format!("claude:{sid}");
+        }
+        if let Some((t, c)) = title_line(&v) {
+            if c || !f.custom_title {
+                title = t;
+                f.custom_title |= c;
+            }
+            continue;
+        }
+        if kind != "user" && kind != "assistant" {
+            continue;
+        }
+        let key = f.key.clone();
+        let s = all.entry(key.clone()).or_insert_with(|| Session {
+            id: key,
+            source: "claude".into(),
+            status: "idle".into(),
+            action: "Готов к работе".into(),
+            started_ms: created_ms(&p.to_string_lossy()).unwrap_or(now),
+            transcript: p.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+        touched = true;
+        let cwd = str_of(&v, "cwd");
+        if s.cwd.is_empty() && !cwd.is_empty() {
+            s.cwd = cwd.to_string();
+            s.project = file_name(cwd.trim_end_matches(['/', '\\']));
+        }
+        if s.pids.is_empty() {
+            if let Some(c) = client_from_entry(str_of(&v, "entrypoint")) {
+                s.client = c.into();
+            }
+        }
+        let hooked = now - s.hooked_ms < 10 * 60 * 1000;
+        let msg = v.get("message").cloned().unwrap_or(Value::Null);
+        let content = msg.get("content").cloned().unwrap_or(Value::Null);
+        s.updated_ms = s.updated_ms.max(mtime);
+        if kind == "user" {
+            let items = content.as_array().cloned().unwrap_or_default();
+            if items.iter().any(|i| str_of(i, "type") == "tool_result") {
+                f.last = "result".into();
+                if !hooked {
+                    s.actions += 1;
+                    s.status = "thinking".into();
+                    s.action = "Думает…".into();
+                    if counting {
+                        bump_activity();
+                    }
+                }
+                continue;
+            }
+            let said = match &content {
+                Value::String(t) => t.clone(),
+                _ => items.iter().find(|i| str_of(i, "type") == "text").map(|i| str_of(i, "text").to_string()).unwrap_or_default(),
+            };
+            let said = said.trim();
+            if said.is_empty() || said.starts_with('<') || v.get("isMeta").and_then(Value::as_bool) == Some(true) {
+                continue;
+            }
+            if said.starts_with("[Request interrupted") {
+                f.last = "end".into();
+                continue;
+            }
+            if s.title.is_empty() {
+                s.title = short(said, 60);
+            }
+            f.last = "prompt".into();
+            f.finished = false;
+            if !hooked {
+                s.status = "thinking".into();
+                s.action = "Думает…".into();
+            }
+        } else {
+            if let Some(u) = msg.get("usage") {
+                let n = |k: &str| u.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+                let used = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens");
+                if used > 0.0 {
+                    s.context = (used / if used > 200_000.0 { 1_000_000.0 } else { 200_000.0 }).min(1.0);
+                }
+            }
+            let items = content.as_array().cloned().unwrap_or_default();
+            if let Some(t) = items.iter().find(|i| str_of(i, "type") == "tool_use") {
+                f.last = "tool".into();
+                f.tool = str_of(t, "name").to_string();
+                f.tool_input = t.get("input").cloned().unwrap_or(Value::Null);
+                if !hooked {
+                    s.status = "working".into();
+                    s.action = describe(&f.tool, &f.tool_input);
+                }
+            } else if items.iter().any(|i| str_of(i, "type") == "text") {
+                f.last = "text".into();
+                if !hooked {
+                    s.status = "thinking".into();
+                    s.action = "Пишет ответ".into();
+                }
+            }
+            match str_of(&msg, "stop_reason") {
+                "" => {}
+                "end_turn" => {
+                    f.stop_seen = true;
+                    f.last = "end".into();
+                }
+                _ => f.stop_seen = true,
+            }
+        }
+    }
+    if !title.is_empty() {
+        if let Some(s) = all.get_mut(&f.key) {
+            s.title = title;
+            touched = true;
+        }
+    }
+
+    // nothing written for a while: guess what it waits for (hooked sessions know)
+    f.watch = false;
+    if let Some(s) = all.get_mut(&f.key) {
+        let hooked = now - s.hooked_ms < 10 * 60 * 1000;
+        let quiet = now - mtime;
+        if !hooked {
+            match f.last.as_str() {
+                // without stop_reason a long pause after text is the best sign
+                "end" | "text" if !f.finished && !(f.last == "text" && f.stop_seen) => {
+                    if f.last == "end" || quiet > 20_000 {
+                        f.finished = true;
+                        if counting && quiet < 60_000 {
+                            bump_done();
+                        }
+                        s.status = "done".into();
+                        s.action = "Готово — ждёт задачу".into();
+                        touched = true;
+                    } else {
+                        f.watch = true;
+                    }
+                }
+                "tool" if f.tool == "AskUserQuestion" && s.status != "waiting" => {
+                    let q = f.tool_input.get("questions").and_then(|q| q.get(0)).map(|q| str_of(q, "question").to_string()).unwrap_or_default();
+                    s.status = "waiting".into();
+                    s.action = format!("Спрашивает {}: {}", place(&s.client), short(&q, 50));
+                    touched = true;
+                }
+                "tool" if s.status == "working" && (ASKS_PERMISSION.contains(&f.tool.as_str()) || f.tool.starts_with("mcp__")) => {
+                    if quiet > 12_000 {
+                        s.status = "waiting".into();
+                        s.action = format!("Ждёт разрешения {}? {}", place(&s.client), describe(&f.tool, &f.tool_input));
+                        touched = true;
+                    } else {
+                        f.watch = true;
+                    }
+                }
+                "prompt" | "result" if s.status == "thinking" => {
+                    if quiet > 180_000 {
+                        s.status = "idle".into();
+                        s.action = "Ждёт".into();
+                        touched = true;
+                    } else {
+                        f.watch = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    touched
 }
 
 /// Reads new lines of one rollout file; true when the session changed.
@@ -823,10 +1191,19 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
             }
             f.key = format!("codex:{id}");
             let cwd = str_of(&pl, "cwd").to_string();
+            let origin = str_of(&pl, "originator").to_lowercase();
+            let client = if origin.contains("vscode") {
+                "vscode"
+            } else if origin.contains("desktop") || origin.contains("app") {
+                "desktop"
+            } else {
+                "terminal"
+            };
             let key = f.key.clone();
             all.entry(key.clone()).or_insert_with(|| Session {
                 id: key,
                 source: "codex".into(),
+                client: client.into(),
                 project: file_name(cwd.trim_end_matches(['/', '\\'])),
                 cwd,
                 status: "idle".into(),
@@ -902,7 +1279,7 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
         let quiet = now - mtime;
         if !f.finished && f.pending_call && quiet > 15_000 && s.status == "working" {
             s.status = "waiting".into();
-            s.action = format!("Ждёт подтверждения в терминале? {}", f.last);
+            s.action = format!("Ждёт подтверждения {}? {}", place(&s.client), f.last);
             touched = true;
         } else if !f.finished && !f.pending_call && quiet > 120_000 && s.status == "thinking" {
             s.status = "idle".into();
@@ -948,13 +1325,13 @@ fn codex_action(pl: &Value) -> String {
     }
 }
 
-fn forget(now: i64, files: &mut HashMap<PathBuf, CodexFile>) -> bool {
+fn forget(now: i64, codex: &mut HashMap<PathBuf, CodexFile>, claude: &mut HashMap<PathBuf, ClaudeFile>) -> bool {
     let Some(h) = hub() else { return false };
     let mut all = lock(&h.sessions);
     let before = all.len();
     all.retain(|_, s| s.request.is_some() || now - s.updated_ms < FORGET_MS);
-    let keys: Vec<String> = all.keys().cloned().collect();
-    files.retain(|p, f| keys.contains(&f.key) || now - mtime_ms(p) < 30 * 60 * 1000);
+    codex.retain(|p, f| all.contains_key(&f.key) || now - mtime_ms(p) < 30 * 60 * 1000);
+    claude.retain(|p, f| all.contains_key(&f.key) || now - f.mtime.max(mtime_ms(p)) < 30 * 60 * 1000);
     before != all.len()
 }
 
@@ -979,8 +1356,11 @@ fn claude_settings() -> PathBuf {
 
 fn hook_command() -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    // hooks run through bash on Windows: forward slashes, quoted
-    Ok(format!("\"{}\" {HOOK_ARG}", exe.to_string_lossy().replace('\\', "/")))
+    // the CLI runs hooks through Git Bash, the apps may use another shell:
+    // forward slashes work everywhere, quotes only when there are spaces
+    // (PowerShell would take a quoted path for a string)
+    let path = exe.to_string_lossy().replace('\\', "/");
+    Ok(if path.contains(' ') { format!("\"{path}\" {HOOK_ARG}") } else { format!("{path} {HOOK_ARG}") })
 }
 
 fn is_ours(entry: &Value) -> bool {

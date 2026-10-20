@@ -1,7 +1,7 @@
 // The island lights up when an agent needs you: who, what for, the question.
 
 import type { AgentSession } from "../api";
-import { agentName, SOURCES } from "../lib/agents";
+import { agentName, place, SOURCES } from "../lib/agents";
 import { ClaudeMark, CodexMark } from "./Icons";
 
 export function AgentPill({ s, more }: { s: AgentSession; more: number }) {
@@ -19,7 +19,9 @@ export function AgentPill({ s, more }: { s: AgentSession; more: number }) {
           <span style={{ color: src.color }}>{src.name}</span> {what}
           {more > 0 && <i>+{more}</i>}
         </div>
-        <div className="agent-pill-who">{agentName(s)}</div>
+        <div className="agent-pill-who">
+          {agentName(s)} · {place(s).where}
+        </div>
         <div className="agent-pill-line">{line.replace(/^\$ /, "")}</div>
       </div>
     </div>

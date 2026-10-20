@@ -119,19 +119,19 @@ function iconFor(key: string): string {
 const min = 60e3;
 const agentList: any[] = [
   {
-    id: "claude:a1", source: "claude", title: "Оплата в боте", project: "telegram-bot", cwd: "C:\\dev\\telegram-bot",
+    id: "claude:a1", source: "claude", client: "desktop", title: "Оплата в боте", project: "telegram-bot", cwd: "C:\\dev\\telegram-bot",
     status: "permission", action: "Ждёт разрешения: npm install stripe", context: 0.22, startedMs: now - 31 * min, updatedMs: now, actions: 27,
     request: {
       id: "r1", kind: "permission", tool: "Bash", title: "Claude хочет выполнить команду", summary: "Ставит зависимости",
       detail: "$ npm install stripe", questions: [], startedMs: now, timeoutMs: 120e3,
     },
   },
-  { id: "claude:a2", source: "claude", title: "Stripe checkout", project: "shop-api", cwd: "C:\\dev\\shop-api", status: "working", action: "Пишет payments.ts", context: 0.34, startedMs: now - 166 * min, updatedMs: now, actions: 112, request: null },
-  { id: "codex:a3", source: "codex", title: "Графики продаж", project: "dashboard", cwd: "C:\\dev\\dashboard", status: "working", action: "Запускает тесты", context: 0.58, startedMs: now - 150 * min, updatedMs: now, actions: 64, request: null },
-  { id: "claude:a4", source: "claude", title: "Новый лендинг", project: "landing", cwd: "C:\\dev\\landing", status: "working", action: "Пишет Pricing.tsx", context: 0.84, startedMs: now - 133 * min, updatedMs: now, actions: 201, request: null },
-  { id: "claude:a5", source: "claude", title: "Экран профиля", project: "mobile-app", cwd: "C:\\dev\\mobile-app", status: "thinking", action: "Думает…", context: 0.12, startedMs: now - 100 * min, updatedMs: now, actions: 18, request: null },
-  { id: "claude:a6", source: "claude", title: "Документация API", project: "docs", cwd: "C:\\dev\\docs", status: "done", action: "Готово — ждёт задачу", context: 0.41, startedMs: now - 80 * min, updatedMs: now, actions: 33, request: null },
-  { id: "codex:a7", source: "codex", title: "Парсер логов", project: "parser", cwd: "C:\\dev\\parser", status: "done", action: "Готово — ждёт задачу", context: 0.27, startedMs: now - 60 * min, updatedMs: now, actions: 41, request: null },
+  { id: "claude:a2", source: "claude", client: "terminal", title: "Stripe checkout", project: "shop-api", cwd: "C:\\dev\\shop-api", status: "working", action: "Пишет payments.ts", context: 0.34, startedMs: now - 166 * min, updatedMs: now, actions: 112, request: null },
+  { id: "codex:a3", source: "codex", client: "desktop", title: "Графики продаж", project: "dashboard", cwd: "C:\\dev\\dashboard", status: "working", action: "Запускает тесты", context: 0.58, startedMs: now - 150 * min, updatedMs: now, actions: 64, request: null },
+  { id: "claude:a4", source: "claude", client: "vscode", title: "Новый лендинг", project: "landing", cwd: "C:\\dev\\landing", status: "working", action: "Пишет Pricing.tsx", context: 0.84, startedMs: now - 133 * min, updatedMs: now, actions: 201, request: null },
+  { id: "claude:a5", source: "claude", client: "desktop", title: "Экран профиля", project: "mobile-app", cwd: "C:\\dev\\mobile-app", status: "thinking", action: "Думает…", context: 0.12, startedMs: now - 100 * min, updatedMs: now, actions: 18, request: null },
+  { id: "claude:a6", source: "claude", client: "terminal", title: "Документация API", project: "docs", cwd: "C:\\dev\\docs", status: "done", action: "Готово — ждёт задачу", context: 0.41, startedMs: now - 80 * min, updatedMs: now, actions: 33, request: null },
+  { id: "codex:a7", source: "codex", client: "terminal", title: "Парсер логов", project: "parser", cwd: "C:\\dev\\parser", status: "done", action: "Готово — ждёт задачу", context: 0.27, startedMs: now - 60 * min, updatedMs: now, actions: 41, request: null },
 ];
 const agentsPayload = () => ({ sessions: [...agentList].sort((a, b) => rank(a) - rank(b) || a.startedMs - b.startedMs), done: 33, activity: [3, 5, 2, 6, 8, 4, 7, 9, 5, 6, 8, 11] });
 const rank = (a: any) => (["permission", "question", "waiting"].includes(a.status) ? 0 : ["working", "thinking"].includes(a.status) ? 1 : 2);
@@ -347,7 +347,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       if (!a || !a.request || a.request.id !== args.request) return Promise.reject("Вопрос уже закрыт");
       a.request = null;
       a.status = args.decision === "chat" ? "waiting" : "working";
-      a.action = args.decision === "chat" ? "Ждёт ответа в терминале" : args.decision === "deny" ? "Думает…" : "Пишет код";
+      a.action = args.decision === "chat" ? "Ждёт ответа в приложении" : args.decision === "deny" ? "Думает…" : "Пишет код";
       setTimeout(emitAgents, 300);
       return r(null);
     }

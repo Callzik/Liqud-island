@@ -7,6 +7,18 @@ export const SOURCES = {
   codex: { name: "Codex", color: "#8f94ff", short: "Codex" },
 } as const;
 
+const PLACES: Record<string, { name: string; where: string; open: string }> = {
+  desktop: { name: "приложение", where: "в приложении", open: "Открыть приложение" },
+  vscode: { name: "VS Code", where: "в VS Code", open: "Открыть VS Code" },
+  cursor: { name: "Cursor", where: "в Cursor", open: "Открыть Cursor" },
+  windsurf: { name: "Windsurf", where: "в Windsurf", open: "Открыть Windsurf" },
+  jetbrains: { name: "IDE", where: "в IDE", open: "Открыть IDE" },
+  terminal: { name: "терминал", where: "в терминале", open: "Открыть терминал" },
+};
+
+/** Where the session runs: the Claude / Codex app, an editor or a terminal. */
+export const place = (s: AgentSession) => PLACES[s.client] ?? PLACES.terminal;
+
 export const needsYou = (s: AgentSession) => s.status === "permission" || s.status === "question" || s.status === "waiting";
 export const isBusy = (s: AgentSession) => s.status === "working" || s.status === "thinking";
 

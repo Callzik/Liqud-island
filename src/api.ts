@@ -172,6 +172,8 @@ export interface AgentSession {
   updatedMs: number;
   actions: number;
   request: AgentRequest | null;
+  /** where it runs: "desktop" (Claude / Codex app) | "vscode" | "cursor" | "windsurf" | "jetbrains" | "terminal" */
+  client: string;
 }
 
 export interface AgentsPayload {

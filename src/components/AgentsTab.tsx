@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { call, type AgentQuestion, type AgentSession, type AgentsPayload, type HookStatus } from "../api";
-import { agentName, badge, elapsed, needsYou, isBusy, SOURCES } from "../lib/agents";
+import { agentName, badge, elapsed, needsYou, isBusy, place, SOURCES } from "../lib/agents";
 import { ClaudeMark, CodexMark, IBack, ICheck, IHand, ITerminal } from "./Icons";
 import type { ToastData } from "./Toast";
 
@@ -13,6 +13,7 @@ export function SourceTag({ s }: { s: AgentSession }) {
     <span className="ag-src" style={{ color: src.color }}>
       {s.source === "claude" ? <ClaudeMark size={13} color={src.color} /> : <CodexMark size={12} color={src.color} />}
       {src.name}
+      {s.client && <em className="ag-place">{place(s).name}</em>}
     </span>
   );
 }
@@ -127,7 +128,8 @@ export function AgentsTab({
             <>
               <div className="ag-empty-title">Подключите Claude Code</div>
               <div className="hint">
-                Остров покажет все сессии: кто пишет код, кто думает, кто ждёт вас. Разрешения и вопросы — прямо отсюда.
+                Остров покажет все сессии — из терминала, приложения Claude и VS Code: кто пишет код, кто думает, кто ждёт вас.
+                Разрешения и вопросы — прямо отсюда.
                 Добавит хуки в {hooks.settingsPath || "~/.claude/settings.json"} (копия старого файла сохранится рядом).
               </div>
               <button className="ag-btn primary" onClick={connect}>
@@ -138,7 +140,8 @@ export function AgentsTab({
             <>
               <div className="ag-empty-title">Пока никто не работает</div>
               <div className="hint">
-                Запустите <code>claude</code> или <code>codex</code> в терминале — сессия появится здесь. Двойной Ctrl — офис.
+                Начните сессию Claude Code или Codex — в терминале, в приложении Claude или в VS Code. Она появится здесь. Двойной
+                Ctrl — офис.
               </div>
             </>
           )}
@@ -253,8 +256,8 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
           <PermissionKeys onAllow={() => answer("allow", undefined, "Разрешено — Claude продолжает")} />
           <div className="ag-actions">
             <span className="hint">Enter — разрешить</span>
-            <button className="ag-btn" onClick={() => answer("chat", undefined, "Ответьте в терминале")}>
-              В терминале
+            <button className="ag-btn" onClick={() => answer("chat", undefined, `Ответьте ${place(s).where}`)}>
+              {cap(place(s).where)}
             </button>
             <button className="ag-btn" onClick={() => answer("deny", undefined, "Отказано — Claude ищет другой путь")}>
               Запретить
@@ -271,7 +274,8 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
           countdown={<Countdown startedMs={req.startedMs} timeoutMs={req.timeoutMs} now={now} />}
           setBusy={setBusy}
           onAnswer={(text) => answer("answer", text, "Ответ отправлен — Claude продолжает")}
-          onChat={() => answer("chat", undefined, "Ответьте в терминале")}
+          onChat={() => answer("chat", undefined, `Ответьте ${place(s).where}`)}
+          chatLabel={cap(place(s).where)}
         />
       ) : (
         <>
@@ -287,7 +291,7 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
           <div className="ag-actions">
             <span className="hint">{s.cwd}</span>
             <button className="ag-btn primary" onClick={() => call("agents_focus", { session: s.id }).catch(() => {})}>
-              Открыть терминал
+              {place(s).open}
             </button>
           </div>
         </>
@@ -295,6 +299,8 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
     </div>
   );
 }
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /** Enter allows (when nothing else has focus). */
 function PermissionKeys({ onAllow }: { onAllow: () => void }) {
@@ -319,12 +325,14 @@ function Questions({
   setBusy,
   onAnswer,
   onChat,
+  chatLabel,
 }: {
   questions: AgentQuestion[];
   countdown: ReactNode;
   setBusy: (b: boolean) => void;
   onAnswer: (text: string) => void;
   onChat: () => void;
+  chatLabel: string;
 }) {
   const [step, setStep] = useState(0);
   // per question: chosen labels; "other" text separately
@@ -441,7 +449,7 @@ function Questions({
       <div className="ag-actions">
         <span className="hint">Цифра — выбрать</span>
         <button className="ag-btn" onClick={onChat}>
-          В терминале
+          {chatLabel}
         </button>
         <button className="ag-btn primary" disabled={!ready} onClick={() => next()}>
           {last ? "Ответить ⏎" : "Дальше ⏎"}

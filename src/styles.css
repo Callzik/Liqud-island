@@ -3218,6 +3218,17 @@ html.is-overlay body {
   flex-shrink: 0;
 }
 
+.ag-place {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--faint);
+  margin-left: 3px;
+}
+
+.ag-place::before {
+  content: "· ";
+}
+
 .ag-ctx {
   display: inline-flex;
   align-items: center;
