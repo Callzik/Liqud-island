@@ -352,3 +352,43 @@ export const IAlert = (p: P) => (
     <path d="M12 7.5v5.5M12 16.5h.01" />
   </Svg>
 );
+export const ITerminal = (p: P) => (
+  <Svg {...p}>
+    <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
+    <path d="M7.5 10l2.5 2-2.5 2M12.5 14.5h4" />
+  </Svg>
+);
+export const IBuilding = (p: P) => (
+  <Svg {...p}>
+    <path d="M5.5 20V5.5A1.5 1.5 0 0 1 7 4h7a1.5 1.5 0 0 1 1.5 1.5V20M15.5 10H18a1 1 0 0 1 1 1v9M3.5 20h17" />
+    <path d="M8.5 8h1M11.5 8h1M8.5 11.5h1M11.5 11.5h1M8.5 15h1M11.5 15h1" />
+  </Svg>
+);
+export const IHand = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 13V6.5a1.25 1.25 0 0 1 2.5 0V12M10.5 11.5V5a1.25 1.25 0 0 1 2.5 0v6.5M13 11.5V6a1.25 1.25 0 0 1 2.5 0v7M15.5 10.5a1.25 1.25 0 0 1 2.5 0V14a6 6 0 0 1-6 6h-.5a5.5 5.5 0 0 1-4.6-2.5L5 14.6a1.3 1.3 0 0 1 2-1.6L8 14" />
+  </Svg>
+);
+export const IBack = (p: P) => (
+  <Svg {...p}>
+    <path d="M14.5 6l-6 6 6 6" />
+  </Svg>
+);
+
+/** Claude Code's little pixel crab. */
+export const ClaudeMark = ({ size = 14, color = "#e07b53" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size * (8 / 11)} viewBox="0 0 11 8" shapeRendering="crispEdges" aria-hidden="true">
+    <path
+      fill={color}
+      d="M2 0h7v1H2zM2 1h1v1H2zM4 1h3v1H4zM8 1h1v1H8zM0 2h11v2H0zM2 4h7v2H2zM2 6h1v2H2zM4 6h1v2H4zM6 6h1v2H6zM8 6h1v2H8z"
+    />
+  </svg>
+);
+
+/** Codex: a little terminal tile. */
+export const CodexMark = ({ size = 14, color = "#8f94ff" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" aria-hidden="true">
+    <rect x="0.5" y="1" width="11" height="10" rx="2.4" fill={color} />
+    <path d="M3 4.4l1.8 1.6L3 7.6M6.2 8h2.8" stroke="#14141a" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);

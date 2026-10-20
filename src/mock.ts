@@ -59,6 +59,8 @@ const state = {
     lyricsInIsland: true,
     updateCheck: true,
     updateSkip: "",
+    agentsEnabled: true,
+    officeHotkey: true,
   },
   data: {
     shelf: [
@@ -110,6 +112,48 @@ function iconFor(key: string): string {
   const letter = (key.split(/[:\\]/).pop() || "?").charAt(0).toUpperCase();
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect x='4' y='4' width='56' height='56' rx='14' fill='hsl(${hue} 70% 55%)'/><text x='32' y='42' font-size='28' font-family='Segoe UI,Arial' font-weight='700' text-anchor='middle' fill='white'>${letter}</text></svg>`;
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
+// --- demo agents (Claude Code / Codex) ---------------------------------------
+
+const min = 60e3;
+const agentList: any[] = [
+  {
+    id: "claude:a1", source: "claude", title: "Оплата в боте", project: "telegram-bot", cwd: "C:\\dev\\telegram-bot",
+    status: "permission", action: "Ждёт разрешения: npm install stripe", context: 0.22, startedMs: now - 31 * min, updatedMs: now, actions: 27,
+    request: {
+      id: "r1", kind: "permission", tool: "Bash", title: "Claude хочет выполнить команду", summary: "Ставит зависимости",
+      detail: "$ npm install stripe", questions: [], startedMs: now, timeoutMs: 120e3,
+    },
+  },
+  { id: "claude:a2", source: "claude", title: "Stripe checkout", project: "shop-api", cwd: "C:\\dev\\shop-api", status: "working", action: "Пишет payments.ts", context: 0.34, startedMs: now - 166 * min, updatedMs: now, actions: 112, request: null },
+  { id: "codex:a3", source: "codex", title: "Графики продаж", project: "dashboard", cwd: "C:\\dev\\dashboard", status: "working", action: "Запускает тесты", context: 0.58, startedMs: now - 150 * min, updatedMs: now, actions: 64, request: null },
+  { id: "claude:a4", source: "claude", title: "Новый лендинг", project: "landing", cwd: "C:\\dev\\landing", status: "working", action: "Пишет Pricing.tsx", context: 0.84, startedMs: now - 133 * min, updatedMs: now, actions: 201, request: null },
+  { id: "claude:a5", source: "claude", title: "Экран профиля", project: "mobile-app", cwd: "C:\\dev\\mobile-app", status: "thinking", action: "Думает…", context: 0.12, startedMs: now - 100 * min, updatedMs: now, actions: 18, request: null },
+  { id: "claude:a6", source: "claude", title: "Документация API", project: "docs", cwd: "C:\\dev\\docs", status: "done", action: "Готово — ждёт задачу", context: 0.41, startedMs: now - 80 * min, updatedMs: now, actions: 33, request: null },
+  { id: "codex:a7", source: "codex", title: "Парсер логов", project: "parser", cwd: "C:\\dev\\parser", status: "done", action: "Готово — ждёт задачу", context: 0.27, startedMs: now - 60 * min, updatedMs: now, actions: 41, request: null },
+];
+const agentsPayload = () => ({ sessions: [...agentList].sort((a, b) => rank(a) - rank(b) || a.startedMs - b.startedMs), done: 33, activity: [3, 5, 2, 6, 8, 4, 7, 9, 5, 6, 8, 11] });
+const rank = (a: any) => (["permission", "question", "waiting"].includes(a.status) ? 0 : ["working", "thinking"].includes(a.status) ? 1 : 2);
+const emitAgents = () => mockEmit("agents", agentsPayload());
+
+function mockAsk() {
+  const a = agentList.find((x) => x.id === "claude:a5")!;
+  a.status = "question";
+  a.action = "Спрашивает: Где хранить данные пользователей?";
+  a.request = {
+    id: "r" + Date.now(), kind: "question", tool: "AskUserQuestion", title: "Claude спрашивает", summary: "SQLite или PostgreSQL?", detail: "",
+    questions: [{
+      question: "Где хранить данные пользователей?", header: "База", multiSelect: false,
+      options: [
+        { label: "SQLite", description: "Локально, без сервера" },
+        { label: "PostgreSQL", description: "На сервере, для многих пользователей" },
+        { label: "JSON", description: "Файлы — быстро для прототипа" },
+      ],
+    }],
+    startedMs: Date.now(), timeoutMs: 120e3,
+  };
+  emitAgents();
 }
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {}): Promise<T> {
@@ -294,6 +338,19 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
     case "open_launcher":
       mockEmit("launcher", true);
       return r(null);
+    case "agents_list":
+      return r(agentsPayload());
+    case "agents_hooks":
+      return r({ installed: true, stale: false, claudeFound: true, codexFound: true, settingsPath: "C:\\Users\\me\\.claude\\settings.json" });
+    case "agents_answer": {
+      const a = agentList.find((x) => x.id === args.session);
+      if (!a || !a.request || a.request.id !== args.request) return Promise.reject("Вопрос уже закрыт");
+      a.request = null;
+      a.status = args.decision === "chat" ? "waiting" : "working";
+      a.action = args.decision === "chat" ? "Ждёт ответа в терминале" : args.decision === "deny" ? "Думает…" : "Пишет код";
+      setTimeout(emitAgents, 300);
+      return r(null);
+    }
     default:
       return r(true);
   }
@@ -349,6 +406,27 @@ if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ === und
     const inside = !!hit && e.clientX >= hit.x && e.clientX <= hit.x + hit.w && e.clientY >= hit.y && e.clientY <= hit.y + hit.h;
     mockEmit("cursor", { x: e.clientX, y: e.clientY, inside, lmb });
   });
+  // double Ctrl → office, like the native keyboard hook
+  let ctrlTap = 0;
+  let ctrlDown = 0;
+  let ctrlClean = false;
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Control") {
+      if (!ctrlDown) {
+        ctrlDown = Date.now();
+        ctrlClean = true;
+      }
+    } else ctrlClean = false;
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key !== "Control") return;
+    const quick = ctrlClean && Date.now() - ctrlDown < 300;
+    ctrlDown = 0;
+    if (quick && Date.now() - ctrlTap < 450) {
+      ctrlTap = 0;
+      mockEmit("office", null);
+    } else ctrlTap = quick ? Date.now() : 0;
+  });
   window.addEventListener("keydown", (e) => {
     if (e.altKey && e.code === "Space") {
       e.preventDefault();
@@ -388,5 +466,16 @@ if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ === und
       mockEmit("download", { name: "ubuntu-24.04-desktop.iso", bytes, speed: 14 * 1024 * 1024, count: 1 });
     }, 250);
   };
-  (window as any).__mock = { emit: mockEmit, state, download };
+  // agents come and go a little
+  setInterval(() => {
+    const busy = agentList.filter((a) => a.status === "working" || a.status === "thinking");
+    const a = busy[Math.floor(Math.random() * busy.length)];
+    if (!a) return;
+    const acts = ["Пишет api.ts", "Запускает тесты", "Ищет по коду", "Читает schema.sql", "Думает…", "Правит index.tsx"];
+    a.action = acts[Math.floor(Math.random() * acts.length)];
+    a.status = a.action === "Думает…" ? "thinking" : "working";
+    a.actions += 1;
+    emitAgents();
+  }, 2500);
+  (window as any).__mock = { emit: mockEmit, state, download, ask: mockAsk };
 }

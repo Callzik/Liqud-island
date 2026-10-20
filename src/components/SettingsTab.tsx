@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { call, type Settings } from "../api";
+import { call, type HookStatus, type Settings } from "../api";
 import { IKeyboard, IPower } from "./Icons";
 import { RESIDENTS, ResidentSvg } from "../lib/residents";
 
@@ -246,6 +246,62 @@ function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (pa
   );
 }
 
+function AgentsSettings({ settings, set }: { settings: Settings; set: <K extends keyof Settings>(k: K, v: Settings[K]) => void }) {
+  const [hooks, setHooks] = useState<HookStatus | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    call<HookStatus>("agents_hooks", { action: "status" }).then(setHooks).catch(() => {});
+  }, []);
+  const run = (action: "install" | "remove") =>
+    call<HookStatus>("agents_hooks", { action })
+      .then((h) => {
+        setHooks(h);
+        setErr("");
+      })
+      .catch((e) => setErr(String(e)));
+  return (
+    <>
+      <div className="settings-section">Агенты</div>
+      <div className="setting">
+        <div>
+          <div className="setting-title">Claude Code и Codex в острове</div>
+          <div className="setting-sub">Вкладки «Агенты» и «Офис», плашка «Нужен ответ»</div>
+        </div>
+        <Toggle checked={settings.agentsEnabled} onChange={(v) => set("agentsEnabled", v)} />
+      </div>
+      <div className="setting">
+        <div>
+          <div className="setting-title">Двойной Ctrl — офис</div>
+          <div className="setting-sub">Пиксельный офис: кто пишет код, кто ждёт, кто отдыхает</div>
+        </div>
+        <Toggle checked={settings.officeHotkey} onChange={(v) => set("officeHotkey", v)} />
+      </div>
+      <div className="setting setting-wide">
+        <div>
+          <div className="setting-title">
+            {hooks?.installed ? (hooks.stale ? "Хуки Claude Code устарели" : "Claude Code подключён") : "Подключить Claude Code"}
+          </div>
+          <div className="setting-sub">
+            {err ||
+              (hooks?.installed
+                ? `Хуки в ${hooks.settingsPath}. Разрешения и вопросы ждут ответа в острове 2 минуты, потом — в терминале`
+                : "Добавит хуки в ~/.claude/settings.json (копия файла сохранится рядом). Codex виден без настройки")}
+          </div>
+        </div>
+        {hooks?.installed && !hooks.stale ? (
+          <button className="text-btn" onClick={() => run("remove")}>
+            Отключить
+          </button>
+        ) : (
+          <button className="text-btn" onClick={() => run("install")}>
+            {hooks?.stale ? "Обновить" : "Подключить"}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function SettingsTab({
   settings,
   save,
@@ -332,6 +388,8 @@ export function SettingsTab({
             ))}
           </select>
         </div>
+
+        <AgentsSettings settings={settings} set={set} />
 
         <div className="settings-section">Захват экрана</div>
         <div className="setting">

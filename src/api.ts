@@ -44,6 +44,8 @@ export interface Settings {
   lyricsInIsland: boolean;
   updateCheck: boolean;
   updateSkip: string;
+  agentsEnabled: boolean;
+  officeHotkey: boolean;
 }
 
 export interface ShelfItem {
@@ -129,6 +131,61 @@ export interface InitPayload {
   version: string;
   hotkeyError: string | null;
   weather?: import("./lib/weather").WeatherPayload | null;
+}
+
+export interface AgentOption {
+  label: string;
+  description: string;
+}
+
+export interface AgentQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: AgentOption[];
+}
+
+export interface AgentRequest {
+  id: string;
+  kind: "permission" | "question";
+  tool: string;
+  title: string;
+  summary: string;
+  detail: string;
+  questions: AgentQuestion[];
+  startedMs: number;
+  timeoutMs: number;
+}
+
+export type AgentStatus = "working" | "thinking" | "permission" | "question" | "waiting" | "done" | "idle";
+
+export interface AgentSession {
+  id: string;
+  source: "claude" | "codex";
+  title: string;
+  project: string;
+  cwd: string;
+  status: AgentStatus;
+  action: string;
+  context: number;
+  startedMs: number;
+  updatedMs: number;
+  actions: number;
+  request: AgentRequest | null;
+}
+
+export interface AgentsPayload {
+  sessions: AgentSession[];
+  done: number;
+  activity: number[];
+}
+
+export interface HookStatus {
+  installed: boolean;
+  stale: boolean;
+  claudeFound: boolean;
+  codexFound: boolean;
+  settingsPath: string;
 }
 
 export type DropEvent =

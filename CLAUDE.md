@@ -39,11 +39,13 @@ src/
   mock.ts              демо-режим для браузера (mockListen — новая обёртка на каждую подписку, иначе StrictMode теряет события)
   components/          Home (плитки 2×4, плеер, ♥/👎 ЯМ, «E · без цензуры»), SettingsTab, Lyrics, Compact,
                        Overlay (захват), Chat, Weather, VoicePill, DownloadPill, RecPill, Residents, Toast, Panel,
-                       Launcher, ClipboardTab, ShelfTab, TextTab, NotesTab, DropZones
+                       Launcher, ClipboardTab, ShelfTab, TextTab, NotesTab, DropZones,
+                       AgentsTab (сессии Claude Code/Codex, разрешения, вопросы), AgentPill, Office (пиксельный офис)
   lib/lyrics.ts        поиск текста: Яндекс Музыка → LRCLIB (/get + поиск по вариантам названия), parseLrc (enhanced-LRC, слоги)
   lib/lyricSync.ts     синхронизация подсветки слов (сглаживание, LEAD=90 мс)
   lib/lyricOffset.ts   ручной сдвиг текста для трека (localStorage)
   lib/residents.tsx    25 жильцов, кадры idle/walk/react
+  lib/agents.ts        статусы агентов, подписи, таймеры
 src-tauri/src/
   main.rs              окна, трей, хоткеи, фоновые потоки, все команды (invoke_handler в конце файла)
   store.rs             Settings (serde camelCase), полка, ярлыки
@@ -54,7 +56,10 @@ src-tauri/src/
   log.rs               журнал ошибок logs\island.log (паники, toast_error, ошибки JS через log_js), трей «Открыть/Скопировать журнал»
   spectrum.rs          WASAPI loopback (cpal) + FFT → 4 полосы для эквалайзера (событие spectrum)
   update.rs            автообновление: releases/latest → *-setup.exe в %TEMP% → запуск с /P /UPDATE /R
-  native/              media (GSMTC), audio (Core Audio, IPolicyConfig), capture (GDI, OCR, QR), speech, clip, input, shell, img
+  agents.rs            агенты (как Lumio): хуки Claude Code (`island.exe --cc-hook` → TCP 127.0.0.1, порт в agents.port),
+                       ответы на PermissionRequest / AskUserQuestion из острова, Codex по ~/.codex/sessions, установка хуков
+  native/              media (GSMTC), audio (Core Audio, IPolicyConfig), capture (GDI, OCR, QR), speech, clip, input
+                       (+ двойной Ctrl через WH_KEYBOARD_LL), shell, img, proc (дерево процессов → окно терминала)
 ```
 
 Фоновые потоки в `main.rs`: media (опрос 300 мс при игре, иначе 700), backdrop (для стекла), weather, voice, downloads,
@@ -67,7 +72,8 @@ update (через 30 с после старта и каждые 6 ч; тост 
 `Ctrl+Shift+S` / `Ctrl+Shift+T`), запись экрана в `Videos\Island`, ИИ-чат (OpenAI-совместимый, по умолчанию
 LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ctrl+Alt+Space`, Windows или Whisper), загрузки,
 вкладки «Текст» и «Заметки», жильцы, текст песни с подсветкой слов, ♥/«не рекомендовать» Яндекс Музыки,
-тема Liquid Glass / чёрная, режим «Без цензуры», прятанье в полноэкранных приложениях, автозапуск.
+тема Liquid Glass / чёрная, режим «Без цензуры», прятанье в полноэкранных приложениях, автозапуск,
+агенты Claude Code / Codex (вкладки «Агенты» и «Офис», двойной Ctrl — офис).
 
 ## Интеграции — детали
 
@@ -87,11 +93,17 @@ LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ct
   поиск YouTube Music. Имя медиасессии своего WebView2 (`OWN_PLAYER = "island|webview"`) — догадка, не проверено.
 - **Стекло**: поток backdrop снимает экран под островом (GDI), уменьшает и шлёт PNG событием `backdrop`;
   canvas рисует его размытым. Окно острова исключено из захвата (`SetWindowDisplayAffinity`), пока включено стекло или идёт запись.
+- **Агенты** (`agents.rs`): кнопка «Подключить» пишет хуки в `~/.claude/settings.json` (копия `settings.json.island-backup`),
+  команда `"<путь к island.exe с />" --cc-hook`, PreToolUse/PermissionRequest с timeout 150 с. Хук-процесс выходит из `main()`
+  до Tauri; без острова молча завершается. Разрешение/вопрос ждут в острове 120 с, потом спрашивает терминал; если окно этого
+  терминала в фокусе — сразу терминал. Ответ на AskUserQuestion — `permissionDecision: deny` с текстом ответа (Claude продолжает).
+  Codex только смотрим (rollout-*.jsonl), «ждёт подтверждения» — догадка по тишине после вызова команды.
 
 ## Не проверено на настоящей Windows
 
 Захват и запись экрана, OCR и распознавание речи, переключение устройства вывода, слежение за загрузками,
-скрытое окно YouTube и его медиасессия, стекло (частота и нагрузка снимков фона), спектр звука (loopback).
+скрытое окно YouTube и его медиасессия, стекло (частота и нагрузка снимков фона), спектр звука (loopback),
+агенты (хуки Claude Code под Git Bash, поиск окна терминала, двойной Ctrl, формат логов Codex).
 
 ## Идеи на будущее (пользователь ещё не выбрал)
 
@@ -112,3 +124,5 @@ LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ct
 - 0.4.4–0.4.6 — медиасессии, Dotify; 0.4.7 — автообновление из релизов GitHub (тост, трей, настройки).
 - 0.4.8 — журнал ошибок; стекло без PNG (BMP через протокол backdrop://, StretchBlt), курсор вдали опрашивается реже;
   эквалайзер по настоящему спектру, цвет острова под обложку (`settings.coverTint`).
+- 0.5.0 — агенты как в Lumio: сессии Claude Code / Codex в острове, разрешения и вопросы прямо из острова,
+  плашка «Нужен ответ», пиксельный офис (двойной Ctrl).

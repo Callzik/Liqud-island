@@ -1,6 +1,7 @@
 // Island — a liquid "Dynamic Island" for Windows 10/11.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agents;
 mod ai;
 mod clips;
 mod record;
@@ -2708,6 +2709,40 @@ fn update_skip(app: AppHandle, state: St<'_>, version: String) {
 }
 
 // ---------------------------------------------------------------------------
+// AI agents (Claude Code / Codex)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn agents_list() -> agents::Payload {
+    agents::snapshot()
+}
+
+#[tauri::command]
+fn agents_answer(session: String, request: String, decision: String, text: Option<String>) -> Result<(), String> {
+    agents::answer(&session, &request, &decision, text)
+}
+
+#[tauri::command]
+async fn agents_focus(state: St<'_>, session: String) -> Result<bool, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || shared.shell.run(move || agents::focus(&session)).unwrap_or(false))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// "status" | "install" | "remove" for the hooks in ~/.claude/settings.json.
+#[tauri::command]
+async fn agents_hooks(action: String) -> Result<agents::HookStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || match action.as_str() {
+        "install" => agents::hooks_install(),
+        "remove" => agents::hooks_remove(),
+        _ => Ok(agents::hooks_status()),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---------------------------------------------------------------------------
 // Tray & entry point
 // ---------------------------------------------------------------------------
 
@@ -2793,6 +2828,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn main() {
+    // Claude Code runs `island.exe --cc-hook` for its hook events
+    if agents::is_hook_call() {
+        agents::hook_main();
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = app.emit("open-panel", "home");
@@ -2921,6 +2961,20 @@ fn main() {
             spawn_downloads_thread(app.handle().clone(), shared.clone());
             spawn_backdrop_thread(app.handle().clone(), shared.clone());
             spawn_update_thread(app.handle().clone(), shared.clone());
+            agents::start(app.handle().clone(), shared.paths.dir.clone());
+            if settings.agents_enabled {
+                thread::spawn(agents::hooks_refresh);
+            }
+            {
+                let app = app.handle().clone();
+                input::watch_double_ctrl(move || {
+                    let st = app.state::<Arc<Shared>>();
+                    let s = lock(&st.settings);
+                    if s.agents_enabled && s.office_hotkey && !st.suppressed.load(Ordering::Relaxed) {
+                        let _ = app.emit("office", ());
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2984,6 +3038,10 @@ fn main() {
             update_check,
             update_install,
             update_skip,
+            agents_list,
+            agents_answer,
+            agents_focus,
+            agents_hooks,
             log_js,
             quit
         ])

@@ -190,3 +190,94 @@ pub fn foreground_is_fullscreen(own: isize) -> bool {
 pub fn lock_workstation() -> bool {
     unsafe { LockWorkStation() }.is_ok()
 }
+
+// ---------------------------------------------------------------------------
+// Double tap of Ctrl (opens the agents' office, like double ⌘ in Lumio)
+// ---------------------------------------------------------------------------
+
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{VK_LCONTROL, VK_RCONTROL};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, GetMessageW, SetWindowsHookExW, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
+    WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+};
+
+#[derive(Default)]
+struct Taps {
+    /// Ctrl is down (since), and nothing else was pressed meanwhile
+    down: Option<Instant>,
+    clean: bool,
+    last_tap: Option<Instant>,
+}
+
+static TAPS: Mutex<Option<Taps>> = Mutex::new(None);
+static ON_DOUBLE_CTRL: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+const TAP_MAX: Duration = Duration::from_millis(300);
+const TAP_GAP: Duration = Duration::from_millis(450);
+
+unsafe extern "system" fn keyboard_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let k = &*(l.0 as *const KBDLLHOOKSTRUCT);
+        // our own Ctrl+V (paste) must not count
+        if k.flags.0 & LLKHF_INJECTED.0 == 0 {
+            let msg = w.0 as u32;
+            let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+            let up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+            let ctrl = k.vkCode == VK_LCONTROL.0 as u32 || k.vkCode == VK_RCONTROL.0 as u32 || k.vkCode == VK_CONTROL.0 as u32;
+            let mut fire = false;
+            if let Ok(mut g) = TAPS.lock() {
+                let t = g.get_or_insert_with(Taps::default);
+                let now = Instant::now();
+                if ctrl && down {
+                    if t.down.is_none() {
+                        t.down = Some(now);
+                        t.clean = true;
+                    }
+                } else if ctrl && up {
+                    let quick = t.clean && t.down.map(|d| now - d <= TAP_MAX).unwrap_or(false);
+                    t.down = None;
+                    if quick {
+                        if t.last_tap.map(|p| now - p <= TAP_GAP).unwrap_or(false) {
+                            t.last_tap = None;
+                            fire = true;
+                        } else {
+                            t.last_tap = Some(now);
+                        }
+                    } else {
+                        t.last_tap = None;
+                    }
+                } else if down {
+                    // Ctrl+C, Ctrl+V… are not taps
+                    t.clean = false;
+                    t.last_tap = None;
+                }
+            }
+            if fire {
+                if let Some(f) = ON_DOUBLE_CTRL.get() {
+                    f();
+                }
+            }
+        }
+    }
+    CallNextHookEx(None, code, w, l)
+}
+
+/// Calls `f` when Ctrl is tapped twice quickly with nothing else pressed.
+pub fn watch_double_ctrl(f: impl Fn() + Send + Sync + 'static) {
+    if ON_DOUBLE_CTRL.set(Box::new(f)).is_err() {
+        return;
+    }
+    let _ = std::thread::Builder::new().name("double-ctrl".into()).spawn(|| unsafe {
+        let module = GetModuleHandleW(None).ok().map(|m| m.into());
+        if SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0).is_err() {
+            return;
+        }
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+    });
+}

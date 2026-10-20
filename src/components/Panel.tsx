@@ -1,6 +1,9 @@
-import type { Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
+import type { AgentsPayload, Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IChat, IClipboard, IHome, IInbox, ILyrics, INote, IPin, ISliders, ISun, ITextTool } from "./Icons";
+import { IBuilding, IChat, IClipboard, IHome, IInbox, ILyrics, INote, IPin, ISliders, ISun, ITerminal, ITextTool } from "./Icons";
+import { AgentsTab } from "./AgentsTab";
+import { Office } from "./Office";
+import { needsYou } from "../lib/agents";
 import { Home } from "./Home";
 import { Lyrics } from "./Lyrics";
 import { Chat } from "./Chat";
@@ -14,7 +17,7 @@ import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
 
-export type Tab = "home" | "clipboard" | "shelf" | "text" | "chat" | "notes" | "weather" | "lyrics" | "settings";
+export type Tab = "home" | "clipboard" | "shelf" | "text" | "chat" | "notes" | "agents" | "office" | "weather" | "lyrics" | "settings";
 
 // order as in the promo video; «Песня» (lyrics) comes last
 const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome; on?: (s: Settings) => boolean }[] = [
@@ -24,6 +27,8 @@ const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome; o
   { id: "text", label: "Текст", Icon: ITextTool, on: (s) => s.textEnabled },
   { id: "chat", label: "Чат", Icon: IChat, on: (s) => s.aiEnabled },
   { id: "notes", label: "Заметки", Icon: INote, on: (s) => s.notesEnabled },
+  { id: "agents", label: "Агенты", Icon: ITerminal, on: (s) => s.agentsEnabled },
+  { id: "office", label: "Офис", Icon: IBuilding, on: (s) => s.agentsEnabled },
   { id: "weather", label: "Погода", Icon: ISun, on: (s) => s.weatherEnabled },
   { id: "lyrics", label: "Песня", Icon: ILyrics },
 ];
@@ -55,9 +60,13 @@ export interface PanelProps {
   onAsked: () => void;
   setDropHandler: (fn: ((paths: string[]) => void) | null) => void;
   weather: WeatherPayload | null;
+  agents: AgentsPayload;
+  agentSel: string | null;
+  setAgentSel: (id: string | null) => void;
 }
 
 export function Panel(p: PanelProps) {
+  const waiting = p.agents.sessions.filter(needsYou).length;
   return (
     <div className="panel">
       <header className="panel-head">
@@ -67,6 +76,7 @@ export function Panel(p: PanelProps) {
               <Icon size={18} />
               {p.tab === id && <span>{label}</span>}
               {id === "shelf" && p.shelf.length > 0 && p.tab !== id && <i className="tab-badge">{p.shelf.length}</i>}
+              {id === "agents" && p.tab !== id && waiting > 0 && <i className="tab-badge hot">{waiting}</i>}
             </button>
           ))}
         </nav>
@@ -106,6 +116,25 @@ export function Panel(p: PanelProps) {
         {p.tab === "notes" && <NotesTab setBusy={p.setBusy} />}
         {p.tab === "clipboard" && <ClipboardTab clips={p.clips} onClose={p.onClose} toast={p.toast} />}
         {p.tab === "shelf" && <ShelfTab shelf={p.shelf} setShelf={p.setShelf} toast={p.toast} setBusy={p.setBusy} />}
+        {p.tab === "agents" && (
+          <AgentsTab
+            agents={p.agents}
+            selected={p.agentSel}
+            setSelected={p.setAgentSel}
+            toast={p.toast}
+            setBusy={p.setBusy}
+            openSettings={() => p.setTab("settings")}
+          />
+        )}
+        {p.tab === "office" && (
+          <Office
+            agents={p.agents}
+            onOpen={(id) => {
+              p.setAgentSel(id);
+              p.setTab("agents");
+            }}
+          />
+        )}
         {p.tab === "settings" && <SettingsTab settings={p.settings} save={p.saveSettings} version={p.version} setBusy={p.setBusy} />}
       </section>
     </div>

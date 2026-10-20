@@ -5,6 +5,7 @@ import {
   on,
   onDrop,
   onFocus,
+  type AgentsPayload,
   type AppItem,
   type Clip,
   type Cover,
@@ -32,8 +33,9 @@ import { VoicePill, type VoiceState } from "./components/VoicePill";
 import { DownloadPill, type DownloadProgress } from "./components/DownloadPill";
 import { Residents, type IslandBox } from "./components/Residents";
 import { RecPill, type RecordingState } from "./components/RecPill";
+import { AgentPill } from "./components/AgentPill";
 
-type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download" | "rec";
+type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download" | "rec" | "agent";
 
 const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }> = {
   hidden: { w: 0, h: 0, r: 0 },
@@ -46,7 +48,11 @@ const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }
   voice: { w: 330, h: 46, r: 23 },
   download: { w: 360, h: 48, r: 24 },
   rec: { w: 196, h: 40, r: 20 },
+  agent: { w: 440, h: 76, r: 30 },
 };
+
+/** The office tab needs more room than the other tabs. */
+const OFFICE_BOX = { w: 820, h: 600, r: 30 };
 
 const LAUNCHER_W = 680;
 const MUSIC_LYRICS_W = 470;
@@ -116,10 +122,15 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [toast, setToast] = useState<ToastData | null>(null);
   const [peek, setPeek] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
+  const [agents, setAgents] = useState<AgentsPayload>({ sessions: [], done: 0, activity: [] });
+  const [agentSel, setAgentSel] = useState<string | null>(null);
+  // the first session that asks something (permission / question)
+  const asking = settings.agentsEnabled ? agents.sessions.filter((s) => s.request) : [];
+  const alert = asking[0] ?? null;
 
   // latest values for long-lived event listeners
-  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab });
-  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle" || rec.active, tab };
+  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab, alert: null as string | null });
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle" || rec.active, tab, alert: alert?.id ?? null };
 
   const mode: Mode = suppressed
     ? "hidden"
@@ -135,6 +146,8 @@ export default function App({ boot }: { boot: InitPayload }) {
           ? "panel"
           : toast
             ? "toast"
+            : alert
+              ? "agent"
             : download && settings.downloadsEnabled
               ? "download"
             : peek && media
@@ -163,7 +176,9 @@ export default function App({ boot }: { boot: InitPayload }) {
       ? { w: LAUNCHER_W, h: launcherH, r: 26 }
       : lyricsInIsland
         ? { ...BOX.music, w: MUSIC_LYRICS_W }
-        : BOX[mode];
+        : mode === "panel" && tab === "office"
+          ? OFFICE_BOX
+          : BOX[mode];
 
   useLayoutEffect(() => {
     placeContent();
@@ -245,6 +260,8 @@ export default function App({ boot }: { boot: InitPayload }) {
         case "voice":
         case "rec":
           return [255, 77, 77, 0.95];
+        case "agent":
+          return alert?.source === "codex" ? [143, 148, 255, 0.95] : [224, 123, 83, 0.95];
         case "download":
           return [110, 180, 255, 0.85];
         case "music":
@@ -265,7 +282,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       w: box.w,
       h: box.h,
       r: box.r,
-      pull: settings.cursorPull && (mode === "idle" || mode === "music" || mode === "toast" || mode === "peek"),
+      pull: settings.cursorPull && (mode === "idle" || mode === "music" || mode === "toast" || mode === "peek" || mode === "agent"),
       wave: settings.musicReactive && music && (mode === "music" || mode === "peek"),
       bars: music && (mode === "music" || mode === "peek"),
       rim: rimFor(),
@@ -279,7 +296,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     const rect = box.w > 0 ? { x: liquid.centerX - box.w / 2 - pad, y: 0, w: box.w + pad * 2, h: box.h + pad } : { x: 0, y: 0, w: 0, h: 0 };
     (window as any).__islandHit = rect;
     call("set_hit", { rect }).catch(() => {});
-  }, [mode, box.w, box.h, box.r, accent, media?.playing, cover.url, settings.cursorPull, settings.musicReactive, settings.coverTint, toast?.tone]);
+  }, [mode, box.w, box.h, box.r, accent, media?.playing, cover.url, settings.cursorPull, settings.musicReactive, settings.coverTint, toast?.tone, alert?.source]);
 
   // ---- accent from cover ---------------------------------------------------
   useEffect(() => {
@@ -363,7 +380,8 @@ export default function App({ boot }: { boot: InitPayload }) {
             unarmedTimer.current = window.setTimeout(fold, readUntil - Date.now());
             return;
           }
-          if (!n.armed && n.panelOpen && !n.pinned && !n.busy) closePanel();
+          // the office (double Ctrl) stays up until Esc / double Ctrl / the cursor leaves it
+          if (!n.armed && n.panelOpen && !n.pinned && !n.busy && n.tab !== "office") closePanel();
         }, 9000);
       }
     },
@@ -424,7 +442,10 @@ export default function App({ boot }: { boot: InitPayload }) {
             enterT = window.setTimeout(() => {
               enterT = 0;
               const n = live.current;
-              if (!n.panelOpen && !n.launcherOpen && !n.drop && !n.toastActions) openPanel(undefined, true);
+              if (n.panelOpen || n.launcherOpen || n.drop || n.toastActions) return;
+              // an agent asks: straight to its question
+              if (n.alert) setAgentSel(n.alert);
+              openPanel(n.alert ? "agents" : undefined, true);
             }, 200);
           }
         } else {
@@ -474,6 +495,20 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<RecordingState>("recording", setRec));
     subs.push(on<DownloadProgress | null>("download", setDownload));
     subs.push(on<ShelfItem[]>("shelf", setShelf));
+    subs.push(on<AgentsPayload>("agents", setAgents));
+    subs.push(
+      on<null>("office", () => {
+        const n = live.current;
+        if (n.panelOpen && n.tab === "office") {
+          setPinned(false);
+          closePanel();
+          return;
+        }
+        setLauncherOpen(false);
+        openPanel("office", false);
+      }),
+    );
+    call<AgentsPayload>("agents_list").then(setAgents).catch(() => {});
     subs.push(
       on<boolean>("launcher", (open) => {
         if (open) openLauncher();
@@ -600,6 +635,8 @@ export default function App({ boot }: { boot: InitPayload }) {
         return <RecPill rec={rec} />;
       case "download":
         return download ? <DownloadPill d={download} /> : null;
+      case "agent":
+        return alert ? <AgentPill s={alert} more={asking.length - 1} /> : null;
       case "idle":
         return weather && settings.weatherEnabled ? <WeatherCompact weather={weather} /> : null;
       case "music":
@@ -646,6 +683,9 @@ export default function App({ boot }: { boot: InitPayload }) {
             onAsked={clearAsk}
             setDropHandler={setChatDrop}
             weather={weather}
+            agents={agents}
+            agentSel={agentSel}
+            setAgentSel={setAgentSel}
           />
         );
       case "launcher":
@@ -667,12 +707,16 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec]);
+  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec, agents, agentSel, alert, asking.length]);
 
   const onIslandClick = () => {
     if ((mode === "toast" && toast?.actions?.length) || mode === "voice") return;
     if (mode === "rec") return void call("record_stop");
     if (mode === "download") return openPanel("shelf", true);
+    if (mode === "agent" && alert) {
+      setAgentSel(alert.id);
+      return openPanel("agents", true);
+    }
     if (mode === "idle" || mode === "music" || mode === "peek" || mode === "toast") openPanel("home", true);
   };
 
