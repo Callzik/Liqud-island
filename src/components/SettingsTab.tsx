@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { call, type HookStatus, type Settings } from "../api";
+import { call, type HookStatus, type MediaApp, type Settings } from "../api";
 import { IKeyboard, IPower } from "./Icons";
 import { RESIDENTS, ResidentSvg } from "../lib/residents";
 
@@ -246,6 +246,44 @@ function CityPicker({ settings, save, setBusy }: { settings: Settings; save: (pa
   );
 }
 
+function MediaAppsSettings({ settings, set }: { settings: Settings; set: <K extends keyof Settings>(k: K, v: Settings[K]) => void }) {
+  const [apps, setApps] = useState<MediaApp[]>([]);
+  useEffect(() => {
+    const load = () => call<MediaApp[]>("media_apps").then(setApps).catch(() => {});
+    load();
+    // a player started while the settings are open shows up by itself
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [settings.mediaHidden]);
+  const hidden = settings.mediaHidden ?? [];
+  const toggle = (id: string, show: boolean) => {
+    const rest = hidden.filter((h) => h.toLowerCase() !== id.toLowerCase());
+    set("mediaHidden", show ? rest : [...rest, id]);
+  };
+  return (
+    <>
+      <div className="settings-section">Плеер</div>
+      {apps.length === 0 && (
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">Скрыть плеер для приложений</div>
+            <div className="setting-sub">Включите звук или видео в приложении — оно появится здесь</div>
+          </div>
+        </div>
+      )}
+      {apps.map((a) => (
+        <div className="setting" key={a.id}>
+          <div>
+            <div className="setting-title">{a.name}</div>
+            <div className="setting-sub">{a.hidden ? "Не показывать в острове" : "Плеер в острове"}</div>
+          </div>
+          <Toggle checked={!a.hidden} onChange={(v) => toggle(a.id, v)} />
+        </div>
+      ))}
+    </>
+  );
+}
+
 function AgentsSettings({ settings, set }: { settings: Settings; set: <K extends keyof Settings>(k: K, v: Settings[K]) => void }) {
   const [hooks, setHooks] = useState<HookStatus | null>(null);
   const [err, setErr] = useState("");
@@ -388,6 +426,8 @@ export function SettingsTab({
             ))}
           </select>
         </div>
+
+        <MediaAppsSettings settings={settings} set={set} />
 
         <AgentsSettings settings={settings} set={set} />
 

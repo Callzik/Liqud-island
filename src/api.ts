@@ -46,6 +46,13 @@ export interface Settings {
   updateSkip: string;
   agentsEnabled: boolean;
   officeHotkey: boolean;
+  mediaHidden: string[];
+}
+
+export interface MediaApp {
+  id: string;
+  name: string;
+  hidden: boolean;
 }
 
 export interface ShelfItem {

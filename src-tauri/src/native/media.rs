@@ -45,6 +45,8 @@ pub struct Media {
     /// last good state; bridges moments when a player (Liner, Electron apps)
     /// briefly returns no metadata while switching tracks
     last: std::cell::RefCell<Option<(MediaState, std::time::Instant)>>,
+    /// app ids (lowercase) the user hid in the settings: never shown
+    hidden: std::cell::RefCell<Vec<String>>,
 }
 
 /// How long a vanished state is still shown while its player stays in the list.
@@ -108,11 +110,36 @@ impl Media {
             prefer: std::cell::RefCell::new(None),
             active: std::cell::RefCell::new(None),
             last: std::cell::RefCell::new(None),
+            hidden: std::cell::RefCell::new(Vec::new()),
         })
     }
 
     pub fn set_prefer(&self, needle: Option<&str>) {
         *self.prefer.borrow_mut() = needle.map(|n| n.to_lowercase());
+    }
+
+    pub fn set_hidden(&self, ids: &[String]) {
+        let ids: Vec<String> = ids.iter().map(|i| i.to_lowercase()).collect();
+        if *self.hidden.borrow() != ids {
+            *self.hidden.borrow_mut() = ids;
+        }
+    }
+
+    fn is_hidden(&self, id: &str) -> bool {
+        self.hidden.borrow().iter().any(|h| h == id)
+    }
+
+    /// App ids of all current sessions, as Windows reports them.
+    pub fn apps(&self) -> Vec<String> {
+        let Ok(list) = self.manager.GetSessions() else { return Vec::new() };
+        let n = list.Size().unwrap_or(0);
+        let mut out: Vec<String> = (0..n)
+            .filter_map(|i| list.GetAt(i).ok())
+            .filter_map(|s| s.SourceAppUserModelId().ok().map(|h| h.to_string_lossy()))
+            .filter(|id| !id.is_empty())
+            .collect();
+        out.dedup();
+        out
     }
 
     /// The first session whose app id contains one of `needles`.
@@ -150,6 +177,7 @@ impl Media {
         let current = self.manager.GetCurrentSession().ok().map(|s| app_of(&s));
         let mut all: Vec<(u8, Session)> = (0..n)
             .filter_map(|i| list.GetAt(i).ok())
+            .filter(|s| !self.is_hidden(&app_of(s)))
             .map(|s| {
                 let id = app_of(&s);
                 let preferred = !parts.is_empty() && parts.iter().any(|k| id.contains(k.as_str()));

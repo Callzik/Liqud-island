@@ -216,6 +216,8 @@ struct Shared {
     /// latest glass backdrop (id, BMP) for the backdrop:// protocol
     backdrop: Mutex<Option<(u32, Arc<Vec<u8>>)>>,
     backdrop_seq: AtomicU32,
+    /// players seen since start (id, name) for the «Скрыть плеер» setting
+    media_apps: Mutex<Vec<(String, String)>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -601,6 +603,15 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
                     }
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
+                }
+                media.set_hidden(&lock(&shared.settings).media_hidden);
+                for id in media.apps() {
+                    let known = lock(&shared.media_apps).iter().any(|(i, _)| i.eq_ignore_ascii_case(&id));
+                    // the island's own YouTube window is not the user's player
+                    if !known && !id.to_lowercase().contains("island") {
+                        let name = media_app_name(&shared, &id);
+                        lock(&shared.media_apps).push((id, name));
+                    }
                 }
                 auto_uncensored(&app, &shared, &media, &mut auto_key);
                 let state = media.state();
@@ -1180,6 +1191,35 @@ fn media_control(state: St<'_>, action: String, value: Option<f64>) {
         action,
         value: value.unwrap_or(0.0),
     });
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaApp {
+    id: String,
+    name: String,
+    hidden: bool,
+}
+
+/// Players for the «Скрыть плеер» setting: seen since start plus the hidden ones.
+#[tauri::command]
+fn media_apps(state: St<'_>) -> Vec<MediaApp> {
+    let hidden = lock(&state.settings).media_hidden.clone();
+    let mut out: Vec<MediaApp> = lock(&state.media_apps)
+        .iter()
+        .map(|(id, name)| MediaApp {
+            id: id.clone(),
+            name: name.clone(),
+            hidden: hidden.iter().any(|h| h.eq_ignore_ascii_case(id)),
+        })
+        .collect();
+    for h in hidden {
+        if !out.iter().any(|a| a.id.eq_ignore_ascii_case(&h)) {
+            let name = known_app_name(&h).unwrap_or_else(|| app_name_from_id(&h));
+            out.push(MediaApp { id: h, name, hidden: true });
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -2925,6 +2965,7 @@ fn main() {
                 yt_failed: Mutex::new(String::new()),
                 backdrop: Mutex::new(None),
                 backdrop_seq: AtomicU32::new(0),
+                media_apps: Mutex::new(Vec::new()),
             });
             app.manage(shared.clone());
 
@@ -2984,6 +3025,7 @@ fn main() {
             launcher_closed,
             open_launcher,
             media_control,
+            media_apps,
             volume_set,
             volume_mute,
             audio_devices,

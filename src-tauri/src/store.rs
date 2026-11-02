@@ -138,6 +138,8 @@ pub struct Settings {
     pub agents_enabled: bool,
     /// Double tap of Ctrl opens the agents' office.
     pub office_hotkey: bool,
+    /// Players (media session app ids) never shown on the island.
+    pub media_hidden: Vec<String>,
 }
 
 impl Default for Settings {
@@ -181,6 +183,7 @@ impl Default for Settings {
             update_skip: String::new(),
             agents_enabled: true,
             office_hotkey: true,
+            media_hidden: Vec::new(),
         }
     }
 }

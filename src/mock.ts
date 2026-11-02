@@ -61,6 +61,7 @@ const state = {
     updateSkip: "",
     agentsEnabled: true,
     officeHotkey: true,
+    mediaHidden: ["Telegram.TelegramDesktop"],
   },
   data: {
     shelf: [
@@ -195,6 +196,12 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
     case "pins_remove":
       state.data.pins = state.data.pins.filter((p) => p.id !== args.id);
       return r(state.data.pins);
+    case "media_apps": {
+      const hidden: string[] = state.settings.mediaHidden ?? [];
+      const ids = ["Spotify.exe", "MSEdge", "Telegram.TelegramDesktop"];
+      const names: Record<string, string> = { "Spotify.exe": "Spotify", MSEdge: "Edge", "Telegram.TelegramDesktop": "Telegram" };
+      return r(ids.map((id) => ({ id, name: names[id], hidden: hidden.includes(id) })));
+    }
     case "media_control":
       if (args.action === "toggle") {
         state.media = { ...state.media, playing: !state.media.playing, updatedMs: Date.now() };
