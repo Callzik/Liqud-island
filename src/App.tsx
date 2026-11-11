@@ -18,6 +18,8 @@ import {
   type Volume,
 } from "./api";
 import { Liquid, type LiquidTarget } from "./liquid";
+import type { Timer } from "./components/TimerPanel";
+import { beep } from "./lib/beep";
 import { accentFrom, DEFAULT_ACCENT, isLightColor, type RGB } from "./lib/color";
 import { Compact, Peek } from "./components/Compact";
 import { chat } from "./lib/chatStore";
@@ -286,7 +288,7 @@ export default function App({ boot }: { boot: InitPayload }) {
         case "drop":
           return [151, 135, 255, 0.9];
         case "toast":
-          return toast?.tone === "error" ? [255, 99, 99, 0.85] : [255, 255, 255, 0.16];
+          return toast?.tone === "error" ? [255, 99, 99, 0.85] : toast?.tone === "alarm" ? [255, 159, 10, 0.95] : [255, 255, 255, 0.16];
         case "panel":
         case "launcher":
           return music ? [accent[0], accent[1], accent[2], 0.35] : [255, 255, 255, 0.08];
@@ -307,6 +309,7 @@ export default function App({ boot }: { boot: InitPayload }) {
           ? [accent[0], accent[1], accent[2], mode === "music" || mode === "peek" ? 0.32 : mode === "panel" || mode === "launcher" ? 0.14 : 0]
           : undefined,
       shadow: mode === "panel" || mode === "launcher" || mode === "drop",
+      spikes: mode === "toast" && toast?.tone === "alarm",
     });
     const pad = mode === "drop" ? 24 : mode === "panel" || mode === "launcher" ? 10 : 6;
     const rect = box.w > 0 ? { x: liquid.centerX - box.w / 2 - pad, y: 0, w: box.w + pad * 2, h: box.h + pad } : { x: 0, y: 0, w: 0, h: 0 };
@@ -371,6 +374,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   // the island; if it never does, fold back after a while.
   const unarmedTimer = useRef(0);
   const openRef = useRef<(t?: Tab, armed?: boolean) => void>(() => {});
+  const closeRef = useRef<() => void>(() => {});
   const openPanel = useCallback(
     (t?: Tab, armed = true) => {
       if (t) setTab(t);
@@ -405,6 +409,9 @@ export default function App({ boot }: { boot: InitPayload }) {
     [closePanel],
   );
   openRef.current = openPanel;
+  closeRef.current = () => {
+    if (live.current.panelOpen && !live.current.pinned) closePanel();
+  };
 
   const bumpUsage = useCallback((target: string) => {
     setUsage((u) => ({ ...u, [target]: (u[target] ?? 0) + 1 }));
@@ -500,6 +507,26 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<boolean>("suppressed", setSuppressed));
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(on<Tab>("open-tab", (t) => openRef.current(t, false)));
+    subs.push(
+      on<Timer>("alarm", (t) => {
+        beep();
+        // the alarm must be seen: fold an open (unpinned) panel
+        closeRef.current();
+        const isTimer = t.kind === "timer";
+        const min = Math.round(t.durationMs / 60e3);
+        showToast(
+          {
+            icon: "timer",
+            tone: "alarm",
+            title: isTimer ? "Время вышло" : t.title,
+            subtitle: isTimer ? `Таймер · ${min ? `${min} мин` : `${Math.round(t.durationMs / 1000)} с`}` : t.repeat === "daily" ? "Напоминание · каждый день" : "Напоминание",
+            actions: [...(isTimer ? [{ label: "Ещё раз", cmd: "timers_again", args: { timer: t } }] : []), { label: "✓", cmd: "timers_list" }],
+            ms: 60000,
+          },
+          60000,
+        );
+      }),
+    );
     subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(on<Settings>("settings", setSettings));
     subs.push(

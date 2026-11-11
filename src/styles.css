@@ -4011,3 +4011,36 @@ html.is-overlay body {
 .chat-src button.on { background: var(--raised); color: var(--text); font-weight: 600; }
 .chat-head { gap: 10px; }
 .chat-head .chat-model { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- timer & reminders (Notes tab) ---------- */
+.notes { grid-template-columns: 210px minmax(0, 1fr) 230px; }
+.tm { display: flex; flex-direction: column; padding: 10px 12px; gap: 8px; min-height: 0; }
+.tm-top { display: flex; align-items: center; gap: 10px; }
+.tm-ring { width: 72px; height: 72px; flex-shrink: 0; }
+.tm-ring .track { fill: none; stroke: var(--raised); stroke-width: 4; }
+.tm-ring .fill { fill: none; stroke: #ff9f0a; stroke-width: 4; stroke-linecap: round; transition: stroke-dasharray 0.25s linear; }
+.tm-ring text { fill: var(--text); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tm-btns { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.tm-start { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px; border-radius: 999px; background: #ff9f0a; color: #111; font-weight: 700; font-size: 12px; }
+.tm-start.stop { background: var(--raised); color: var(--text); }
+.tm-custom { font-size: 11px; color: var(--muted); padding: 5px; border-radius: 999px; border: 1px solid var(--line); }
+.tm-custom-form input { width: 100%; box-sizing: border-box; font-size: 11.5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--accent); background: transparent; color: var(--text); outline: none; text-align: center; }
+.tm-presets { display: flex; gap: 4px; align-items: center; font-size: 10.5px; color: var(--faint); }
+.tm-presets button { width: 30px; height: 22px; border-radius: 7px; background: var(--raised); color: var(--muted); font-size: 11px; }
+.tm-presets button.on { background: var(--text); color: var(--card); color: #111; background: #fff; }
+.tm-presets button:disabled { opacity: 0.4; }
+.tm-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.tm-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.tm-empty { font-size: 10.5px; color: var(--faint); line-height: 1.45; text-align: center; padding: 6px 4px; }
+.tm-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 9px; background: var(--raised); }
+.tm-item > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tm-item b { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-item small { font-size: 10.5px; color: var(--muted); }
+.tm-item button { color: var(--faint); }
+.tm-input { display: flex; flex-direction: column; gap: 3px; }
+.tm-input input { font-size: 11.5px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--raised); color: var(--text); outline: none; }
+.tm-input input:focus { border-color: var(--accent); }
+.tm-input small { font-size: 10px; color: #34c759; padding-left: 4px; }
+.tm-input small.bad { color: var(--faint); }
+.toast-alarm .toast-icon { color: #ff9f0a; animation: tm-shake 0.5s ease-in-out infinite; }
+@keyframes tm-shake { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }

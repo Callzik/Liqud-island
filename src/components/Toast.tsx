@@ -1,6 +1,6 @@
 import { call, dragOut } from "../api";
 import { WeatherIcon } from "./WeatherIcon";
-import { IAlert, ICheck, ICopy, IDownload, IImage, IInbox, ILauncher, IMic, IPipette, IQr, IText, IVideo } from "./Icons";
+import { IAlert, IBell, ICheck, ICopy, IDownload, IImage, IInbox, ILauncher, IMic, IPipette, IQr, IText, IVideo } from "./Icons";
 
 export interface ToastAction {
   label: string;
@@ -9,12 +9,12 @@ export interface ToastAction {
 }
 
 export interface ToastData {
-  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color" | "rain" | "mic" | "download" | "video";
+  icon: "shelf" | "launcher" | "copy" | "check" | "error" | "image" | "text" | "qr" | "color" | "rain" | "mic" | "download" | "video" | "timer";
   /** weather code for the "rain" icon */
   wx?: number;
   title: string;
   subtitle?: string;
-  tone?: "error";
+  tone?: "error" | "alarm";
   /** thumbnail (data url) shown instead of the icon */
   image?: string;
   /** colour sample shown instead of the icon */
@@ -26,12 +26,12 @@ export interface ToastData {
   ms?: number;
 }
 
-const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette, mic: IMic, download: IDownload, video: IVideo };
+const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette, mic: IMic, download: IDownload, video: IVideo, timer: IBell };
 
 export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }) {
   const Icon = (ICONS as Record<string, typeof ICheck>)[data.icon] ?? ICheck;
   return (
-    <div className={`toast ${data.tone === "error" ? "toast-error" : ""}`}>
+    <div className={`toast ${data.tone === "error" ? "toast-error" : ""} ${data.tone === "alarm" ? "toast-alarm" : ""}`}>
       {data.image ? (
         <img
           className={`toast-thumb ${data.drag ? "can-drag" : ""}`}

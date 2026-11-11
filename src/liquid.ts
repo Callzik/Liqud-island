@@ -13,6 +13,8 @@ export interface LiquidTarget {
   wave: boolean;
   /** equalizer bars on the right */
   bars: boolean;
+  /** jagged, trembling bottom edge (alarm: the island «bristles») */
+  spikes?: boolean;
   /** rim colour along the bottom edge, rgba */
   rim: [number, number, number, number];
   /** colour the body takes from the album art, rgba (alpha 0 = none) */
@@ -74,6 +76,7 @@ export class Liquid {
   private pullX = new Spring(500, 300, 32);
   private wave = new Spring(0, 40, 12);
   private bars = new Spring(0, 60, 14);
+  private spikes = new Spring(0, 90, 10);
   private rim: [number, number, number, number] = [255, 255, 255, 0.12];
   private rimTarget: [number, number, number, number] = [255, 255, 255, 0.12];
   private tint: [number, number, number, number] = [0, 0, 0, 0];
@@ -83,7 +86,7 @@ export class Liquid {
   /** glass look: the screen behind the island, blurred inside the shape */
   private glass = false;
   private backdrop: { img: HTMLImageElement; x: number; y: number; w: number; h: number } | null = null;
-  private springs = [this.w, this.h, this.r, this.pull, this.pullX, this.wave, this.bars, this.shadow];
+  private springs = [this.w, this.h, this.r, this.pull, this.pullX, this.wave, this.bars, this.shadow, this.spikes];
 
   private level = 0;
   private levelTarget = 0;
@@ -150,6 +153,7 @@ export class Liquid {
     this.r.target = t.r;
     this.wave.target = t.wave ? 1 : 0;
     this.bars.target = t.bars ? 1 : 0;
+    this.spikes.target = t.spikes ? 1 : 0;
     this.shadow.target = t.shadow ? 1 : 0;
     this.rimTarget = t.rim;
     const tint = t.tint ?? [this.tint[0], this.tint[1], this.tint[2], 0];
@@ -294,7 +298,9 @@ export class Liquid {
       this.rim.some((v, i) => Math.abs(v - this.rimTarget[i]) > 0.5 * (i === 3 ? 0.01 : 1)) ||
       this.tint.some((v, i) => Math.abs(v - this.tintTarget[i]) > 0.5 * (i === 3 ? 0.005 : 1)) ||
       this.wave.value > 0.01 ||
-      this.bars.value > 0.01;
+      this.bars.value > 0.01 ||
+      this.spikes.value > 0.01 ||
+      !this.spikes.settled(0.01);
     if (animating) this.raf = requestAnimationFrame(this.tick);
     else {
       for (const s of [this.w, this.h, this.r]) s.snap();
@@ -363,6 +369,15 @@ export class Liquid {
       const k1 = (2 * Math.PI) / 40;
       const k2 = (2 * Math.PI) / 97;
       d += amp * env * (0.85 * Math.sin(k1 * (x - L) - this.t * 5.4) + 0.15 * Math.sin(k2 * (x - L) + this.t * 2.3));
+    }
+    const sp = this.spikes.value;
+    if (sp > 0.01) {
+      // sawtooth that shivers in place
+      const period = 13;
+      const ph = ((x - L) / period) % 1;
+      const tooth = 1 - Math.abs(ph * 2 - 1);
+      const shiver = 0.75 + 0.25 * Math.sin(this.t * 38 + (x - L) * 0.9);
+      d += sp * 6 * tooth * shiver * env;
     }
     return d;
   }

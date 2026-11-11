@@ -51,6 +51,7 @@ src-tauri/src/
   store.rs             Settings (serde camelCase), полка, ярлыки
   ym.rs                Яндекс Музыка: токен, ♥/👎, текст песен
   yt.rs                YouTube Data API: поиск того же трека
+  timers.rs            таймер и напоминания (поток, timers.json; событие alarm → тост «Время вышло», liquid spikes)
   record.rs            запись экрана в MP4 (windows-capture)
   recaudio.rs          звук записи (`settings.recAudio`: none/system/mic): loopback и микрофон через cpal во временные WAV
                        (тишина досыпается по часам), при остановке сводятся в MP4 через MediaComposition (перекодирование)
@@ -77,7 +78,7 @@ update (через 30 с после старта и каждые 6 ч; тост 
 (translate.googleapis.com, gtx), перевод в буфер и вкладка «Текст»,
 `Ctrl+Shift+S` / `Ctrl+Shift+T`), запись экрана в `Videos\Island`, ИИ-чат (OpenAI-совместимый, по умолчанию
 LM Studio; кнопки Gemini/DeepSeek открывают сайт в своём окне под островом — `ai_web`, профиль `ai-webview`), погода плитками (Open-Meteo + ipwho.is: ветер с компасом, влажность и точка росы, давление в мм, солнце, осадки, УФ; часы/неделя), голос → текст (`Ctrl+Alt+Space`, Windows или Whisper), загрузки,
-вкладки «Текст» и «Заметки», жильцы, текст песни с подсветкой слов, ♥/«не рекомендовать» Яндекс Музыки,
+вкладки «Текст» (перевод, JSON, Base64) и «Заметки» (+ таймер и напоминания словами: TimerPanel.tsx, lib/reminders.ts), жильцы, текст песни с подсветкой слов, ♥/«не рекомендовать» Яндекс Музыки,
 тема Liquid Glass / чёрная, тема острова тёмная/светлая/как в Windows и свой цвет (`islandTheme`, `islandColor`,
 liquid.setBase, классы theme-light/theme-tinted), настраиваемая «Главная» (`homeHide`: плеер, «Недавно скопировано», громкость, плитки, ярлыки), режим «Без цензуры», прятанье в полноэкранных приложениях, автозапуск,
 агенты Claude Code / Codex (вкладки «Агенты» и «Офис», двойной Ctrl — офис),

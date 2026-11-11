@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { call } from "../api";
 import { ago } from "../lib/format";
 import { IPin, IPlus, ISearch, ITrash } from "./Icons";
+import { TimerPanel } from "./TimerPanel";
 
 interface Note {
   id: string;
@@ -77,6 +78,7 @@ export function NotesTab({ setBusy }: { setBusy: (b: boolean) => void }) {
 
   if (notes === null) return <div className="notes" />;
 
+
   return (
     <div className="notes">
       <div className="notes-side">
@@ -142,6 +144,7 @@ export function NotesTab({ setBusy }: { setBusy: (b: boolean) => void }) {
           </div>
         )}
       </div>
+      <TimerPanel setBusy={setBusy} />
     </div>
   );
 }

@@ -161,6 +161,14 @@ function mockAsk() {
   emitAgents();
 }
 
+let mockTimers: any[] = [];
+setInterval(() => {
+  const due = mockTimers.filter((t) => t.atMs <= Date.now());
+  if (!due.length) return;
+  mockTimers = mockTimers.filter((t) => t.atMs > Date.now());
+  due.forEach((t) => mockEmit("alarm", t));
+  mockEmit("timers", mockTimers);
+}, 500);
 const mockSys = { wifi: true, bluetooth: true, dark: true, ssid: "Home-5G", vpn: [{ name: "Работа", connected: false }] };
 const mockNets = [
   { ssid: "Home-5G", signal: 92, secure: true, connected: true, known: true },
@@ -171,6 +179,20 @@ const mockNets = [
 export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {}): Promise<T> {
   const r = (v: unknown) => Promise.resolve(v as T);
   switch (cmd) {
+    case "timers_list":
+      return r(mockTimers);
+    case "timers_add":
+    case "timers_again": {
+      const t = { ...args.timer };
+      if (cmd === "timers_again") t.atMs = Date.now() + t.durationMs;
+      mockTimers = [...mockTimers.filter((x: any) => x.id !== t.id), t];
+      mockEmit("timers", mockTimers);
+      return r(mockTimers);
+    }
+    case "timers_remove":
+      mockTimers = mockTimers.filter((x: any) => x.id !== args.id);
+      mockEmit("timers", mockTimers);
+      return r(mockTimers);
     case "sys_state":
       return r(mockSys);
     case "wifi_list":

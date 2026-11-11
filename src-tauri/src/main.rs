@@ -11,6 +11,7 @@ mod log;
 mod native;
 mod spectrum;
 mod store;
+mod timers;
 mod translate;
 mod update;
 mod voice;
@@ -2782,6 +2783,28 @@ fn notes_load(state: St<'_>) -> serde_json::Value {
 }
 
 #[tauri::command]
+fn timers_list() -> Vec<timers::Timer> {
+    timers::list()
+}
+
+#[tauri::command]
+fn timers_add(app: AppHandle, timer: timers::Timer) -> Vec<timers::Timer> {
+    timers::add(&app, timer)
+}
+
+/// «Ещё раз» on the alarm: the same timer from now.
+#[tauri::command]
+fn timers_again(app: AppHandle, mut timer: timers::Timer) -> Vec<timers::Timer> {
+    timer.at_ms = store::now_ms() + timer.duration_ms.max(1000);
+    timers::add(&app, timer)
+}
+
+#[tauri::command]
+fn timers_remove(app: AppHandle, id: String) -> Vec<timers::Timer> {
+    timers::remove(&app, &id)
+}
+
+#[tauri::command]
 fn notes_save(state: St<'_>, notes: serde_json::Value) {
     save_json(&state.paths.notes(), &notes);
 }
@@ -3098,6 +3121,7 @@ fn main() {
         .setup(|app| {
             let paths = Paths::new(app.path().app_data_dir()?);
             log::init(&paths.dir);
+            timers::spawn(app.handle().clone(), paths.dir.join("timers.json"));
             let first_run = !paths.settings().exists();
             let settings: Settings = load_json(&paths.settings());
             let data: Data = load_json(&paths.data());
@@ -3270,6 +3294,10 @@ fn main() {
             paste_text,
             notes_load,
             notes_save,
+            timers_list,
+            timers_add,
+            timers_remove,
+            timers_again,
             update_check,
             update_install,
             update_skip,
