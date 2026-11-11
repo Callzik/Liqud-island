@@ -1,5 +1,6 @@
 import { call, dragOut } from "../api";
 import { WeatherIcon } from "./WeatherIcon";
+import { Face } from "./Face";
 import { IAlert, IBell, ICheck, ICopy, IDownload, IImage, IInbox, ILauncher, IMic, IPipette, IQr, IText, IVideo } from "./Icons";
 
 export interface ToastAction {
@@ -28,11 +29,15 @@ export interface ToastData {
 
 const ICONS = { shelf: IInbox, launcher: ILauncher, copy: ICopy, check: ICheck, error: IAlert, image: IImage, text: IText, qr: IQr, color: IPipette, mic: IMic, download: IDownload, video: IVideo, timer: IBell };
 
-export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }) {
+export function Toast({ data, onDone, face }: { data: ToastData; onDone?: () => void; face?: boolean }) {
   const Icon = (ICONS as Record<string, typeof ICheck>)[data.icon] ?? ICheck;
   return (
     <div className={`toast ${data.tone === "error" ? "toast-error" : ""} ${data.tone === "alarm" ? "toast-alarm" : ""}`}>
-      {data.image ? (
+      {face && !data.image && (data.tone === "alarm" || data.icon === "check") ? (
+        <div className="toast-face">
+          <Face mood={data.tone === "alarm" ? "alarm" : "happy"} />
+        </div>
+      ) : data.image ? (
         <img
           className={`toast-thumb ${data.drag ? "can-drag" : ""}`}
           src={data.image}

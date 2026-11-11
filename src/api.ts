@@ -51,6 +51,7 @@ export interface Settings {
   homeHide: string[];
   islandColor: string;
   islandTheme: "dark" | "light" | "system";
+  islandFace: boolean;
 }
 
 export interface MediaApp {

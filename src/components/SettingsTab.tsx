@@ -411,6 +411,13 @@ function IslandLook({ settings, save }: { settings: Settings; save: (patch: Part
           </label>
         </div>
       </div>
+      <div className="setting">
+        <div>
+          <div className="setting-title">Глазки в острове</div>
+          <div className="setting-sub">Следят за курсором, думают, пока пишет ИИ, пугаются будильника</div>
+        </div>
+        <Toggle checked={settings.islandFace !== false} onChange={(v) => save({ islandFace: v })} />
+      </div>
       <div className="setting setting-wide home-parts">
         <div>
           <div className="setting-title">Что на «Главной»</div>

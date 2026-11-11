@@ -66,6 +66,7 @@ const state = {
     homeHide: [],
     islandColor: "",
     islandTheme: "dark",
+    islandFace: true,
   },
   data: {
     shelf: [

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   call,
@@ -31,6 +31,7 @@ import { useLyrics } from "./lib/useLyrics";
 import { setYandexLyrics } from "./lib/lyrics";
 import { rainSoon, sky, deg, type WeatherPayload } from "./lib/weather";
 import { WeatherCompact } from "./components/Weather";
+import { Face } from "./components/Face";
 import { VoicePill, type VoiceState } from "./components/VoicePill";
 import { DownloadPill, type DownloadProgress } from "./components/DownloadPill";
 import { Residents, type IslandBox } from "./components/Residents";
@@ -163,6 +164,8 @@ export default function App({ boot }: { boot: InitPayload }) {
     ghostRef.current = { mode, node: innerRef.current ? innerRef.current.cloneNode(true) : null };
   }
 
+  const chatState = useSyncExternalStore(chat.subscribe, chat.get);
+  const aiThinking = chatState.messages.some((m) => m.pending);
   const glass = settings.theme === "glass";
   useEffect(() => {
     liquidRef.current?.setGlass(glass);
@@ -352,6 +355,13 @@ export default function App({ boot }: { boot: InitPayload }) {
     };
     window.addEventListener("unhandledrejection", onRejection);
     return () => window.removeEventListener("unhandledrejection", onRejection);
+  }, [showToast]);
+
+  // «Привет!» from the face once at start
+  useEffect(() => {
+    if (live.current.settings.islandFace === false) return;
+    const t = window.setTimeout(() => showToast({ icon: "check", title: "Привет! 👋" }, 2200), 900);
+    return () => window.clearTimeout(t);
   }, [showToast]);
 
   const peekTimer = useRef(0);
@@ -684,6 +694,13 @@ export default function App({ boot }: { boot: InitPayload }) {
       case "agent":
         return alert ? <AgentPill s={alert} more={asking.length - 1} /> : null;
       case "idle":
+        if (settings.islandFace !== false)
+          return (
+            <div className="idle-face">
+              <Face mood={aiThinking ? "think" : "idle"} />
+              {weather && settings.weatherEnabled && <WeatherCompact weather={weather} />}
+            </div>
+          );
         return weather && settings.weatherEnabled ? <WeatherCompact weather={weather} /> : null;
       case "music":
         return (
@@ -697,7 +714,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       case "peek":
         return media ? <Peek media={media} cover={cover.url} /> : null;
       case "toast":
-        return toast ? <Toast data={toast} onDone={hideToast} /> : null;
+        return toast ? <Toast data={toast} onDone={hideToast} face={settings.islandFace !== false} /> : null;
       case "drop":
         return <DropZones zone={drop?.zone ?? null} count={drop?.paths.length ?? 0} />;
       case "panel":
@@ -753,7 +770,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec, agents, agentSel, alert, asking.length]);
+  }, [mode, aiThinking, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec, agents, agentSel, alert, asking.length]);
 
   const onIslandClick = () => {
     if ((mode === "toast" && toast?.actions?.length) || mode === "voice") return;

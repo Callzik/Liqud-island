@@ -4044,3 +4044,26 @@ html.is-overlay body {
 .tm-input small.bad { color: var(--faint); }
 .toast-alarm .toast-icon { color: #ff9f0a; animation: tm-shake 0.5s ease-in-out infinite; }
 @keyframes tm-shake { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
+
+/* ---------- «Глазки» ---------- */
+.face { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: calc(6px * var(--fs, 1)); min-width: calc(30px * var(--fs, 1)); height: calc(18px * var(--fs, 1)); color: #fff; }
+.theme-light .face { color: #111; }
+.face .eye { display: block; width: calc(6px * var(--fs, 1)); height: calc(11px * var(--fs, 1)); border-radius: 4px; background: currentColor; transition: transform 0.12s ease-out, height 0.08s; }
+.face.blink .eye { height: calc(2px * var(--fs, 1)); }
+.face-sleep .eye { height: calc(2px * var(--fs, 1)); }
+.face-think .eye { animation: face-think 1.6s ease-in-out infinite; }
+@keyframes face-think { 0%, 100% { transform: translate(2px, -2px); } 50% { transform: translate(-1px, -3px); } }
+.face-dots { position: absolute; top: calc(-7px * var(--fs, 1)); left: 50%; transform: translateX(-50%); display: flex; gap: 2px; }
+.face-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.3; animation: face-dot 1.2s infinite; }
+.face-dots i:nth-child(2) { animation-delay: 0.2s; }
+.face-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes face-dot { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.face-alarm { color: #ff9f0a; }
+.face-alarm .eye { width: calc(8px * var(--fs, 1)); height: calc(13px * var(--fs, 1)); border-radius: 5px; animation: face-shake 0.18s linear infinite; }
+@keyframes face-shake { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1px); } }
+.face-bang { position: absolute; top: calc(-6px * var(--fs, 1)); right: calc(-6px * var(--fs, 1)); width: 11px; height: 11px; border-radius: 50%; background: #ff3b30; color: #fff; font-size: 8px; font-weight: 800; display: grid; place-items: center; }
+.face-smile { color: #9be15d; }
+.face-smile path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; }
+.idle-face { height: 100%; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 14px 3px; font-size: 13px; font-weight: 600; }
+.idle-face .wx-compact { height: auto; padding: 0; gap: 6px; }
+.toast-face { width: 44px; display: grid; place-items: center; flex-shrink: 0; }

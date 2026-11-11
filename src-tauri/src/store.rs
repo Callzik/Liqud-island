@@ -148,6 +148,8 @@ pub struct Settings {
     pub island_color: String,
     /// "dark", "light" or "system" (follow Windows).
     pub island_theme: String,
+    /// «Глазки» living in the island.
+    pub island_face: bool,
 }
 
 impl Default for Settings {
@@ -196,6 +198,7 @@ impl Default for Settings {
             home_hide: Vec::new(),
             island_color: String::new(),
             island_theme: "dark".into(),
+            island_face: true,
         }
     }
 }
