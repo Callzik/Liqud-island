@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   call,
@@ -18,7 +18,7 @@ import {
   type Volume,
 } from "./api";
 import { Liquid, type LiquidTarget } from "./liquid";
-import { accentFrom, DEFAULT_ACCENT, type RGB } from "./lib/color";
+import { accentFrom, DEFAULT_ACCENT, isLightColor, type RGB } from "./lib/color";
 import { Compact, Peek } from "./components/Compact";
 import { chat } from "./lib/chatStore";
 import { Toast, type ToastData } from "./components/Toast";
@@ -165,6 +165,22 @@ export default function App({ boot }: { boot: InitPayload }) {
   useEffect(() => {
     liquidRef.current?.setGlass(glass);
   }, [glass]);
+
+  // island colour and light/dark theme ("system" follows Windows through the WebView)
+  const [sysLight, setSysLight] = useState(() => window.matchMedia?.("(prefers-color-scheme: light)").matches ?? false);
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: light)");
+    if (!mq) return;
+    const fn = () => setSysLight(mq.matches);
+    mq.addEventListener("change", fn);
+    return () => mq.removeEventListener("change", fn);
+  }, []);
+  const islandColor = settings.islandColor || "";
+  const light = !glass && (islandColor ? isLightColor(islandColor) : settings.islandTheme === "light" || (settings.islandTheme === "system" && sysLight));
+  const baseColor = islandColor || (light ? "#f3f3f6" : "#000");
+  useEffect(() => {
+    liquidRef.current?.setBase(baseColor);
+  }, [baseColor]);
 
   // set during render, so the lyrics key below already knows the source
   setYandexLyrics(!!settings.ymToken);
@@ -724,7 +740,10 @@ export default function App({ boot }: { boot: InitPayload }) {
   };
 
   return (
-    <div className={`root ${suppressed ? "is-hidden" : ""} ${glass ? "theme-glass" : ""}`}>
+    <div
+      className={`root ${suppressed ? "is-hidden" : ""} ${glass ? "theme-glass" : ""} ${light ? "theme-light" : ""} ${islandColor && !light ? "theme-tinted" : ""}`}
+      style={islandColor && !glass ? ({ ["--island" as string]: islandColor } as CSSProperties) : undefined}
+    >
       <canvas ref={canvasRef} className="liquid" />
       {settings.residentsEnabled && (
         <Residents

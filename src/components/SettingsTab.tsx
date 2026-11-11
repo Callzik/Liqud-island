@@ -340,6 +340,101 @@ function AgentsSettings({ settings, set }: { settings: Settings; set: <K extends
   );
 }
 
+export const HOME_PARTS: { group: string; items: { id: string; label: string }[] }[] = [
+  {
+    group: "Слева",
+    items: [
+      { id: "player", label: "Плеер" },
+      { id: "recent", label: "Недавно скопировано" },
+      { id: "volume", label: "Громкость" },
+    ],
+  },
+  {
+    group: "Плитки",
+    items: [
+      { id: "region", label: "Область" },
+      { id: "full", label: "Весь экран" },
+      { id: "ocr", label: "Текст с экрана" },
+      { id: "qr", label: "QR-код" },
+      { id: "picker", label: "Пипетка" },
+      { id: "plain", label: "Чистый текст" },
+      { id: "record", label: "Запись экрана" },
+      { id: "command", label: "Команда" },
+    ],
+  },
+  { group: "Снизу", items: [{ id: "dock", label: "Ярлыки" }] },
+];
+
+const SWATCHES = ["", "#1b2a4a", "#1f3b2c", "#4a1d2e", "#38245c", "#5a3a1a", "#f4e7cf", "#e3ecf8", "#ffffff"];
+
+function IslandLook({ settings, save }: { settings: Settings; save: (patch: Partial<Settings>) => void }) {
+  const hide = settings.homeHide ?? [];
+  const toggle = (id: string) => save({ homeHide: hide.includes(id) ? hide.filter((x) => x !== id) : [...hide, id] });
+  return (
+    <>
+      <div className="setting setting-wide">
+        <div>
+          <div className="setting-title">Тема острова</div>
+          <div className="setting-sub">«Как в Windows» переключается вместе с темой системы</div>
+        </div>
+        <div className="seg">
+          {(
+            [
+              ["dark", "Тёмная"],
+              ["light", "Светлая"],
+              ["system", "Как в Windows"],
+            ] as const
+          ).map(([v, l]) => (
+            <button key={v} className={(settings.islandTheme ?? "dark") === v ? "on" : ""} onClick={() => save({ islandTheme: v, islandColor: "" })}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="setting setting-wide">
+        <div>
+          <div className="setting-title">Цвет острова</div>
+          <div className="setting-sub">Текст на острове сам станет светлым или тёмным</div>
+        </div>
+        <div className="swatches">
+          {SWATCHES.map((c) => (
+            <button
+              key={c || "default"}
+              className={`swatch ${(settings.islandColor ?? "") === c ? "on" : ""} ${c ? "" : "auto"}`}
+              style={c ? { background: c } : undefined}
+              title={c || "По теме"}
+              onClick={() => save({ islandColor: c })}
+            />
+          ))}
+          <label className="swatch custom" title="Свой цвет">
+            <input type="color" value={settings.islandColor || "#000000"} onChange={(e) => save({ islandColor: e.target.value })} />
+          </label>
+        </div>
+      </div>
+      <div className="setting setting-wide home-parts">
+        <div>
+          <div className="setting-title">Что на «Главной»</div>
+          <div className="setting-sub">Оставь только нужное — остров перестроится сам</div>
+        </div>
+        <div className="home-parts-groups">
+          {HOME_PARTS.map((g) => (
+            <div key={g.group} className="home-parts-group">
+              <span>{g.group}</span>
+              <div>
+                {g.items.map((it) => (
+                  <button key={it.id} className={`chip ${hide.includes(it.id) ? "" : "on"}`} onClick={() => toggle(it.id)}>
+                    {it.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function SettingsTab({
   settings,
   save,
@@ -388,6 +483,7 @@ export function SettingsTab({
             </button>
           </div>
         </div>
+        <IslandLook settings={settings} save={save} />
         {rows.map((r) => (
           <div className="setting" key={r.key}>
             <div>

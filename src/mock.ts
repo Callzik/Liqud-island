@@ -63,6 +63,9 @@ const state = {
     officeHotkey: true,
     mediaHidden: ["Telegram.TelegramDesktop"],
     recAudio: "system",
+    homeHide: [],
+    islandColor: "",
+    islandTheme: "dark",
   },
   data: {
     shelf: [

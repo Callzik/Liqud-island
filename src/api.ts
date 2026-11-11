@@ -48,6 +48,9 @@ export interface Settings {
   officeHotkey: boolean;
   mediaHidden: string[];
   recAudio: "none" | "system" | "mic";
+  homeHide: string[];
+  islandColor: string;
+  islandTheme: "dark" | "light" | "system";
 }
 
 export interface MediaApp {

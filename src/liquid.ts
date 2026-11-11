@@ -77,6 +77,7 @@ export class Liquid {
   private rim: [number, number, number, number] = [255, 255, 255, 0.12];
   private rimTarget: [number, number, number, number] = [255, 255, 255, 0.12];
   private tint: [number, number, number, number] = [0, 0, 0, 0];
+  private base = "#000";
   private tintTarget: [number, number, number, number] = [0, 0, 0, 0];
   private shadow = new Spring(0, 80, 18);
   /** glass look: the screen behind the island, blurred inside the shape */
@@ -164,6 +165,13 @@ export class Liquid {
 
   clearCursor() {
     this.cursor = null;
+    this.kick();
+  }
+
+  /** Body colour of the island (black by default; light theme / custom colour). */
+  setBase(color: string) {
+    if (this.base === color) return;
+    this.base = color;
     this.kick();
   }
 
@@ -405,7 +413,7 @@ export class Liquid {
       ctx.shadowOffsetY = 8 * this.shadow.value;
     }
     this.shapePath(ctx, L, R, H, rr, f);
-    ctx.fillStyle = this.glass ? "rgba(0,0,0,0.22)" : "#000";
+    ctx.fillStyle = this.glass ? "rgba(0,0,0,0.22)" : this.base;
     ctx.fill();
     ctx.restore();
 
@@ -478,7 +486,7 @@ export class Liquid {
     for (const d of this.drops) {
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, d.life * 1.5));
-      ctx.fillStyle = this.glass ? "rgba(30,30,36,0.55)" : "#000";
+      ctx.fillStyle = this.glass ? "rgba(30,30,36,0.55)" : this.base;
       ctx.beginPath();
       ctx.ellipse(d.x, d.y, d.r * 0.9, d.r * (1 + Math.min(0.5, d.vy / 1600)), 0, 0, Math.PI * 2);
       ctx.fill();

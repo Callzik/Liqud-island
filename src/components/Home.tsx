@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { call, type PinItem } from "../api";
+import { call, type Clip, type PinItem } from "../api";
 import { css } from "../lib/color";
-import { clock } from "../lib/format";
+import { ago, clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
 import { Cover } from "./Compact";
 import { ICheck, IChevron, IHeart, IHeartOff, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
@@ -276,6 +276,36 @@ function VolumeRow({ volume }: Pick<PanelProps, "volume">) {
   );
 }
 
+/** «Недавно скопировано»: the last three clipboard entries, click pastes. */
+function RecentClips({ clips, onClose, setTab }: { clips: Clip[]; onClose: () => void; setTab: PanelProps["setTab"] }) {
+  const list = clips.slice(0, 3);
+  return (
+    <div className="card recent-card">
+      <button className="recent-head" onClick={() => setTab("clipboard")} title="Вся история">
+        Недавно скопировано <IChevron size={12} />
+      </button>
+      {list.length === 0 && <div className="hint">Пока ничего не скопировано</div>}
+      {list.map((c) => (
+        <button
+          key={c.id}
+          className="recent-item"
+          title="Вставить"
+          onClick={() => {
+            onClose();
+            call("clip_paste", { id: c.id, paste: true });
+          }}
+        >
+          <span className="recent-icon">
+            {c.kind === "image" && c.thumb ? <img src={c.thumb} alt="" /> : c.kind === "image" ? <IRegion size={14} /> : <span>T</span>}
+          </span>
+          <span className="recent-text">{c.kind === "image" ? `Изображение ${c.width}×${c.height}` : c.kind === "files" ? c.files.map((f) => f.split(/[\\/]/).pop()).join(", ") : c.preview}</span>
+          <span className="recent-ago">{ago(c.ts)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Action({ icon: Icon, label, onClick }: { icon: typeof IRegion; label: string; onClick: () => void }) {
   return (
     <button className="action" onClick={onClick}>
@@ -325,52 +355,77 @@ export function Home(p: PanelProps) {
     p.setPins(await call<PinItem[]>("pins_remove", { id: pin.id }));
   };
 
+  const hide = new Set(p.settings.homeHide ?? []);
+  const showPlayer = !hide.has("player") && !!p.media;
+  const showRecent = !hide.has("recent") && !showPlayer;
+  const showClock = !showPlayer && !showRecent && !hide.has("player");
+  const showVolume = !hide.has("volume");
+  const left = showPlayer || showRecent || showClock || showVolume;
+  const tiles: { id: string; icon: typeof IRegion; label: string; run: () => void }[] = [
+    { id: "region", icon: IRegion, label: "Область", run: () => capture("region") },
+    { id: "full", icon: IFullscreen, label: "Весь экран", run: () => capture("full") },
+    { id: "ocr", icon: IScanText, label: "Текст с экрана", run: () => capture("ocr") },
+    { id: "qr", icon: IQr, label: "QR-код", run: () => capture("qr") },
+    { id: "picker", icon: IPipette, label: "Пипетка", run: () => capture("picker") },
+    {
+      id: "plain",
+      icon: IEraser,
+      label: "Чистый текст",
+      run: async () => {
+        p.onClose();
+        const ok = await call<boolean>("paste_plain");
+        if (!ok) p.toast({ icon: "error", tone: "error", title: "В буфере нет текста" });
+      },
+    },
+    { id: "record", icon: IRecord, label: "Запись экрана", run: () => capture("record") },
+    { id: "command", icon: ICommand, label: "Команда", run: p.onLauncher },
+  ].filter((t) => !hide.has(t.id));
+  const dock = !hide.has("dock");
+  const cols = left ? 2 : 4;
+  const rows = Math.max(1, Math.ceil(tiles.length / cols));
+
   return (
-    <div className="home">
-      <div className="home-left">
-        <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} saveSettings={p.saveSettings} toast={p.toast} setTab={p.setTab} />
-        <VolumeRow volume={p.volume} />
-      </div>
-      <div className="actions">
-        <Action icon={IRegion} label="Область" onClick={() => capture("region")} />
-        <Action icon={IFullscreen} label="Весь экран" onClick={() => capture("full")} />
-        <Action icon={IScanText} label="Текст с экрана" onClick={() => capture("ocr")} />
-        <Action icon={IQr} label="QR-код" onClick={() => capture("qr")} />
-        <Action icon={IPipette} label="Пипетка" onClick={() => capture("picker")} />
-        <Action
-          icon={IEraser}
-          label="Чистый текст"
-          onClick={async () => {
-            p.onClose();
-            const ok = await call<boolean>("paste_plain");
-            if (!ok) p.toast({ icon: "error", tone: "error", title: "В буфере нет текста" });
-          }}
-        />
-        <Action icon={IRecord} label="Запись экрана" onClick={() => capture("record")} />
-        <Action icon={ICommand} label="Команда" onClick={p.onLauncher} />
-      </div>
-      <div className="card dock">
-        {p.pins.map((pin) => (
-          <PinButton key={pin.id} pin={pin} onRemove={() => removePin(pin)} />
-        ))}
-        <button className="dock-add" onClick={addPins} title="Добавить программу или файл">
-          <IPlus size={18} />
-        </button>
-        {p.settings.voiceEnabled && (
-          <button
-            className="dock-mic"
-            title={`Голос → текст · ${p.settings.hotkeyVoice}`}
-            onClick={() => {
-              p.onClose();
-              window.setTimeout(() => call("voice", { action: "start" }), 200);
-            }}
-          >
-            <IMic size={18} />
-            <span>Диктовка</span>
+    <div className={`home ${left ? "" : "no-left"} ${tiles.length ? "" : "no-tiles"} ${dock ? "" : "no-dock"}`}>
+      {left && (
+        <div className="home-left">
+          {(showPlayer || showClock) && (
+            <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} saveSettings={p.saveSettings} toast={p.toast} setTab={p.setTab} />
+          )}
+          {showRecent && <RecentClips clips={p.clips} onClose={p.onClose} setTab={p.setTab} />}
+          {showVolume && <VolumeRow volume={p.volume} />}
+        </div>
+      )}
+      {tiles.length > 0 && (
+        <div className="actions" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
+          {tiles.map((t) => (
+            <Action key={t.id} icon={t.icon} label={t.label} onClick={t.run} />
+          ))}
+        </div>
+      )}
+      {dock && (
+        <div className="card dock">
+          {p.pins.map((pin) => (
+            <PinButton key={pin.id} pin={pin} onRemove={() => removePin(pin)} />
+          ))}
+          <button className="dock-add" onClick={addPins} title="Добавить программу или файл">
+            <IPlus size={18} />
           </button>
-        )}
-        {p.pins.length === 0 && <span className="dock-hint">Перетащите ярлык на остров → «В лаунчер»</span>}
-      </div>
+          {p.settings.voiceEnabled && (
+            <button
+              className="dock-mic"
+              title={`Голос → текст · ${p.settings.hotkeyVoice}`}
+              onClick={() => {
+                p.onClose();
+                window.setTimeout(() => call("voice", { action: "start" }), 200);
+              }}
+            >
+              <IMic size={18} />
+              <span>Диктовка</span>
+            </button>
+          )}
+          {p.pins.length === 0 && <span className="dock-hint">Перетащите ярлык на остров → «В лаунчер»</span>}
+        </div>
+      )}
     </div>
   );
 }

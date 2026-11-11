@@ -142,6 +142,12 @@ pub struct Settings {
     pub media_hidden: Vec<String>,
     /// Sound in screen recordings: "none", "system" (what the PC plays) or "mic" (PC + microphone).
     pub rec_audio: String,
+    /// Parts of «Главная» the user switched off: "player", "recent", "volume", "dock", tile ids.
+    pub home_hide: Vec<String>,
+    /// Island body colour ("" = classic black).
+    pub island_color: String,
+    /// "dark", "light" or "system" (follow Windows).
+    pub island_theme: String,
 }
 
 impl Default for Settings {
@@ -187,6 +193,9 @@ impl Default for Settings {
             office_hotkey: true,
             media_hidden: Vec::new(),
             rec_audio: "system".into(),
+            home_hide: Vec::new(),
+            island_color: String::new(),
+            island_theme: "dark".into(),
         }
     }
 }
