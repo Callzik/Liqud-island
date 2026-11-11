@@ -62,6 +62,7 @@ const state = {
     agentsEnabled: true,
     officeHotkey: true,
     mediaHidden: ["Telegram.TelegramDesktop"],
+    recAudio: "system",
   },
   data: {
     shelf: [

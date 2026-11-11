@@ -453,6 +453,25 @@ export function SettingsTab({
           </div>
           <HotkeyField value={settings.hotkeyOcr} onChange={(v) => set("hotkeyOcr", v)} setBusy={setBusy} />
         </div>
+        <div className="setting setting-wide">
+          <div>
+            <div className="setting-title">Звук в записи</div>
+            <div className="setting-sub">Для MP4. Звук компьютера — то, что ты слышишь: видео, игра, звонок</div>
+          </div>
+          <div className="seg">
+            {(
+              [
+                ["none", "Без звука"],
+                ["system", "Звук компьютера"],
+                ["mic", "Компьютер и микрофон"],
+              ] as const
+            ).map(([v, l]) => (
+              <button key={v} className={(settings.recAudio ?? "system") === v ? "on" : ""} onClick={() => set("recAudio", v)}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="settings-section">ИИ-чат</div>
         <div className="setting">

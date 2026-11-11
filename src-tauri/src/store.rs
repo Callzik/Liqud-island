@@ -140,6 +140,8 @@ pub struct Settings {
     pub office_hotkey: bool,
     /// Players (media session app ids) never shown on the island.
     pub media_hidden: Vec<String>,
+    /// Sound in screen recordings: "none", "system" (what the PC plays) or "mic" (PC + microphone).
+    pub rec_audio: String,
 }
 
 impl Default for Settings {
@@ -184,6 +186,7 @@ impl Default for Settings {
             agents_enabled: true,
             office_hotkey: true,
             media_hidden: Vec::new(),
+            rec_audio: "system".into(),
         }
     }
 }

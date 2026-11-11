@@ -62,6 +62,9 @@ pub struct Recording {
     control: Option<CaptureControl<Handler, String>>,
     encoder: Shared,
     pub path: PathBuf,
+    taps: Vec<crate::recaudio::Tap>,
+    /// why the sound could not start (shown when the video is saved)
+    audio_error: Option<String>,
 }
 
 /// H.264 wants even frame sizes.
@@ -77,6 +80,7 @@ pub fn start(
     mon_h: u32,
     rect: Option<(u32, u32, u32, u32)>,
     path: PathBuf,
+    audio: &str,
 ) -> Result<Recording, String> {
     let (crop, w, h) = match rect {
         Some((x, y, w, h)) => {
@@ -111,23 +115,56 @@ pub fn start(
         },
     );
     let control = Handler::start_free_threaded(settings).map_err(|e| format!("Захват экрана недоступен: {e}"))?;
+    // sound goes to temporary WAV files beside the video and is mixed in at the end
+    use crate::recaudio::{Source, Tap};
+    let mut taps = Vec::new();
+    let mut audio_error = None;
+    let sources: &[Source] = match audio {
+        "system" => &[Source::Speakers],
+        "mic" => &[Source::Speakers, Source::Mic],
+        _ => &[],
+    };
+    for (i, src) in sources.iter().enumerate() {
+        match Tap::start(*src, path.with_extension(format!("a{i}.wav"))) {
+            Ok(t) => taps.push(t),
+            Err(e) => audio_error = Some(e),
+        }
+    }
     Ok(Recording {
         control: Some(control),
         encoder: shared,
         path,
+        taps,
+        audio_error,
     })
 }
 
 impl Recording {
-    /// Stops capturing and finalises the MP4 file.
-    pub fn finish(mut self) -> Result<PathBuf, String> {
+    pub fn has_audio(&self) -> bool {
+        !self.taps.is_empty()
+    }
+
+    /// Stops capturing and finalises the MP4 file; the second value is a warning about the sound.
+    pub fn finish(mut self) -> Result<(PathBuf, Option<String>), String> {
         let enc = self.encoder.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(c) = self.control.take() {
             let _ = c.stop();
         }
-        match enc {
+        let wavs: Vec<PathBuf> = self.taps.drain(..).filter_map(|t| t.finish()).collect();
+        let video = match enc {
             Some(e) => e.finish().map(|_| self.path.clone()).map_err(|e| e.to_string()),
             None => Err("запись уже остановлена".into()),
+        };
+        let mut warn = self.audio_error.take().map(|e| format!("Без звука: {e}"));
+        if let (Ok(v), false) = (&video, wavs.is_empty()) {
+            if let Err(e) = crate::recaudio::mux(v, &wavs) {
+                crate::log::warn(&format!("звук записи: {e}"));
+                warn = Some(format!("Звук не добавился: {e}"));
+            }
         }
+        for w in &wavs {
+            let _ = std::fs::remove_file(w);
+        }
+        video.map(|v| (v, warn))
     }
 }

@@ -52,6 +52,8 @@ src-tauri/src/
   ym.rs                Яндекс Музыка: токен, ♥/👎, текст песен
   yt.rs                YouTube Data API: поиск того же трека
   record.rs            запись экрана в MP4 (windows-capture)
+  recaudio.rs          звук записи (`settings.recAudio`: none/system/mic): loopback и микрофон через cpal во временные WAV
+                       (тишина досыпается по часам), при остановке сводятся в MP4 через MediaComposition (перекодирование)
   ai.rs weather.rs voice.rs downloads.rs clips.rs
   log.rs               журнал ошибок logs\island.log (паники, toast_error, ошибки JS через log_js), трей «Открыть/Скопировать журнал»
   spectrum.rs          WASAPI loopback (cpal) + FFT → 4 полосы для эквалайзера (событие spectrum)
@@ -113,7 +115,8 @@ LM Studio), погода плитками (Open-Meteo + ipwho.is: ветер с 
 Захват и запись экрана, OCR и распознавание речи, переключение устройства вывода, слежение за загрузками,
 скрытое окно YouTube и его медиасессия, стекло (частота и нагрузка снимков фона), спектр звука (loopback),
 агенты (хуки Claude Code под Git Bash, поиск окна терминала, двойной Ctrl, формат логов Codex),
-центр управления (Wi-Fi профили, Radios без пакета MSIX, rasdial).
+центр управления (Wi-Fi профили, Radios без пакета MSIX, rasdial), звук в записи (MediaComposition),
+редактор скриншота и перевод (только в браузерном демо).
 
 ## Идеи на будущее (пользователь ещё не выбрал)
 

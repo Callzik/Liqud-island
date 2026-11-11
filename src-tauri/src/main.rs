@@ -5,6 +5,7 @@ mod agents;
 mod ai;
 mod clips;
 mod record;
+mod recaudio;
 mod downloads;
 mod log;
 mod native;
@@ -2004,7 +2005,8 @@ fn start_recording(app: &AppHandle, shared: &Arc<Shared>, shot: &Shot, rect: Opt
     let hmon = capture::monitor_handle_at(shot.x + shot.w as i32 / 2, shot.y + shot.h as i32 / 2);
     // the island (red dot and timer) stays out of the video
     capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), true);
-    match record::start(hmon, shot.w, shot.h, rect, path) {
+    let audio = lock(&shared.settings).rec_audio.clone();
+    match record::start(hmon, shot.w, shot.h, rect, path, &audio) {
         Ok(rec) => {
             *lock(&shared.recording) = Some(rec);
             recording_state(app, true, store::now_ms());
@@ -2022,19 +2024,26 @@ async fn record_stop(app: AppHandle, state: St<'_>) -> Result<(), String> {
     let shared = state.inner().clone();
     let Some(rec) = lock(&shared.recording).take() else { return Ok(()) };
     recording_state(&app, false, 0);
+    if rec.has_audio() {
+        // mixing the sound in re-encodes the video: can take a while
+        toast(
+            &app,
+            ToastPayload { icon: "video".into(), title: "Сохраняю запись…".into(), subtitle: Some("Добавляю звук".into()), ms: Some(120_000), ..Default::default() },
+        );
+    }
     let result = tauri::async_runtime::spawn_blocking(move || rec.finish())
         .await
         .map_err(|e| e.to_string())?;
     capture::exclude_from_capture(shared.own_hwnd.load(Ordering::Relaxed), keep_out_of_capture(&shared));
     match result {
-        Ok(path) => {
+        Ok((path, warn)) => {
             let name = store::file_name(&path.to_string_lossy());
             toast(
                 &app,
                 ToastPayload {
                     icon: "video".into(),
                     title: "Запись сохранена".into(),
-                    subtitle: Some(format!("{name} · Видео\\Island")),
+                    subtitle: Some(warn.unwrap_or_else(|| format!("{name} · Видео\\Island"))),
                     actions: vec![ToastAction {
                         label: "Показать в папке".into(),
                         cmd: "reveal".into(),

@@ -47,6 +47,7 @@ export interface Settings {
   agentsEnabled: boolean;
   officeHotkey: boolean;
   mediaHidden: string[];
+  recAudio: "none" | "system" | "mic";
 }
 
 export interface MediaApp {
