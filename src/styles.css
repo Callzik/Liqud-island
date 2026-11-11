@@ -3931,3 +3931,23 @@ html.is-overlay body {
 .wx2-sunrow { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); }
 .wx2-uv { position: relative; height: 5px; border-radius: 3px; margin: 6px 0 2px; background: linear-gradient(90deg, #4cd964, #ffd60a, #ff9f0a, #ff453a, #bf5af2); }
 .wx2-uv i { position: absolute; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid #111; transform: translate(-50%, -50%); }
+.tt-tool.tt-accent { background: var(--accent); color: #fff; border-color: transparent; }
+.toast-thumb.can-drag { cursor: grab; }
+.toast-hint { font-size: 10.5px; color: var(--faint); margin-top: 2px; }
+
+/* ---------- screenshot editor ---------- */
+.an-canvas { position: fixed; z-index: 5; touch-action: none; cursor: crosshair; }
+.an-canvas.an-text { cursor: text; }
+.an-text { position: fixed; z-index: 7; min-width: 40px; background: transparent; border: 1px dashed rgba(255, 255, 255, 0.7); outline: none; resize: none; font-weight: 700; font-family: "Segoe UI", system-ui, sans-serif; line-height: 1.2; padding: 0; overflow: hidden; field-sizing: content; }
+.an-bar { position: fixed; z-index: 8; display: flex; align-items: center; gap: 3px; padding: 5px; border-radius: 12px; background: rgba(28, 28, 32, 0.96); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); color: #fff; font: 12px "Segoe UI", system-ui, sans-serif; }
+.an-btn { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: rgba(255, 255, 255, 0.75); }
+.an-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.an-btn.on { background: rgba(255, 255, 255, 0.18); color: #fff; }
+.an-btn:disabled { opacity: 0.35; }
+.an-sep { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.14); margin: 0 3px; }
+.an-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); margin: 0 1px; }
+.an-color.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+.an-size { width: 22px; height: 28px; display: grid; place-items: center; border-radius: 7px; }
+.an-size i { display: block; border-radius: 50%; background: rgba(255, 255, 255, 0.55); }
+.an-size.on i { background: #fff; }
+.an-done { margin-left: 4px; padding: 6px 12px; border-radius: 8px; background: #fff; color: #111; font-weight: 600; }

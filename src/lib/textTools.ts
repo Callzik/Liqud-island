@@ -108,3 +108,37 @@ export function counts(s: string) {
     lines: s ? s.split("\n").length : 0,
   };
 }
+
+export function jsonPretty(s: string): string {
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return s;
+  }
+}
+
+export function jsonLine(s: string): string {
+  try {
+    return JSON.stringify(JSON.parse(s));
+  } catch {
+    return s;
+  }
+}
+
+export function toBase64(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin);
+}
+
+export function fromBase64(s: string): string {
+  try {
+    const bin = atob(s.trim());
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    return s;
+  }
+}
+
+export const capitalizeWords = (s: string) => s.toLocaleLowerCase("ru-RU").replace(/(^|[\s\-«"(])(\p{L})/gu, (_, a: string, b: string) => a + b.toLocaleUpperCase("ru-RU"));

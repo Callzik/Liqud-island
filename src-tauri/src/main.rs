@@ -10,6 +10,7 @@ mod log;
 mod native;
 mod spectrum;
 mod store;
+mod translate;
 mod update;
 mod voice;
 mod weather;
@@ -281,6 +282,9 @@ struct ToastPayload {
     actions: Vec<ToastAction>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ms: Option<u32>,
+    /// file the preview image drags out as (screenshot → chat / folder)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drag: Option<String>,
 }
 
 fn toast(app: &AppHandle, t: ToastPayload) {
@@ -1872,6 +1876,11 @@ fn finish_image(app: &AppHandle, shared: &Shared, bgra: &[u8], w: u32, h: u32) {
         toast_error(app, "Не удалось сохранить скриншот", "");
         return;
     };
+    finish_rgba(app, shared, &rgba, w, h, png);
+}
+
+/// Screenshot (possibly annotated in the overlay) → clipboard + «Снимки экрана» + toast.
+fn finish_rgba(app: &AppHandle, shared: &Shared, rgba: &[u8], w: u32, h: u32, png: Vec<u8>) {
     let copied = clip::write_image(w, h, &rgba, Some(&png));
     if copied {
         shared.clip_skip_seq.store(clip::sequence(), Ordering::Relaxed);
@@ -1882,10 +1891,16 @@ fn finish_image(app: &AppHandle, shared: &Shared, bgra: &[u8], w: u32, h: u32) {
     let image = img::encode_png(tw, th, &thumb).map(|b| util::data_url("image/png", &b));
     let mut actions = Vec::new();
     if let (true, Some(p)) = (saved, &path) {
+        let p = p.to_string_lossy().to_string();
+        actions.push(ToastAction {
+            label: "Перевести".into(),
+            cmd: "shot_translate".into(),
+            args: serde_json::json!({ "path": p }),
+        });
         actions.push(ToastAction {
             label: "Показать".into(),
             cmd: "reveal".into(),
-            args: serde_json::json!({ "path": p.to_string_lossy() }),
+            args: serde_json::json!({ "path": p }),
         });
     }
     toast(
@@ -1901,7 +1916,8 @@ fn finish_image(app: &AppHandle, shared: &Shared, bgra: &[u8], w: u32, h: u32) {
             }),
             image,
             actions,
-            ms: Some(4200),
+            drag: path.filter(|_| saved).map(|p| p.to_string_lossy().to_string()),
+            ms: Some(6000),
             ..Default::default()
         },
     );
@@ -2104,6 +2120,68 @@ fn capture_finish(app: AppHandle, state: St<'_>, id: u32, rect: Option<PxRect>, 
             _ => finish_image(&app, &shared, &px, w, h),
         }
     });
+}
+
+/// Region screenshot edited in the overlay (arrows, frames, text, blur): the page renders
+/// the final PNG itself and sends it here as base64.
+#[tauri::command]
+fn capture_finish_png(app: AppHandle, state: St<'_>, id: u32, png: String) {
+    let shot = lock(&state.shot).take();
+    end_overlay(&app, &state);
+    input::activate(state.last_fg.load(Ordering::Relaxed));
+    if shot.filter(|s| s.id == id).is_none() {
+        return;
+    }
+    let shared = state.inner().clone();
+    thread::spawn(move || {
+        let decoded = util::base64_decode(&png).and_then(|b| img::decode_png(&b).map(|(w, h, rgba)| (w, h, rgba, b)));
+        match decoded {
+            Some((w, h, rgba, bytes)) => finish_rgba(&app, &shared, &rgba, w, h, bytes),
+            None => toast_error(&app, "Не удалось сохранить скриншот", "картинка повреждена"),
+        }
+    });
+}
+
+/// «Перевести» on the screenshot toast: OCR → Text tab with the translation tool applied.
+#[tauri::command]
+fn shot_translate(app: AppHandle, path: String) {
+    thread::spawn(move || {
+        let Some((w, h, rgba)) = fs::read(&path).ok().and_then(|b| img::decode_png(&b)) else {
+            toast_error(&app, "Скриншот не найден", "");
+            return;
+        };
+        let bgra = capture::bgra_to_rgba(&rgba); // the swap is symmetric
+        let text = thread::spawn(move || {
+            let _com = util::Com::mta();
+            capture::ocr(&bgra, w, h)
+        })
+        .join()
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            toast_error(&app, "Текст не найден", "На скриншоте нечего переводить");
+            return;
+        }
+        match tauri::async_runtime::block_on(translate::translate(&text, None)) {
+            Ok(t) => {
+                clip::write_text(&t);
+                // the Text tab reads the clipboard when it opens
+                let _ = app.emit_to(EventTarget::webview_window("main"), "open-tab", "text");
+                toast(
+                    &app,
+                    ToastPayload { icon: "text".into(), title: "Перевод готов".into(), subtitle: Some("Уже в буфере".into()), ms: Some(2500), ..Default::default() },
+                );
+            }
+            Err(e) => toast_error(&app, "Не удалось перевести", &e),
+        }
+    });
+}
+
+#[tauri::command]
+async fn translate_text(text: String, to: Option<String>) -> Result<String, String> {
+    translate::translate(&text, to.as_deref()).await
 }
 
 // ---------------------------------------------------------------------------
@@ -3075,6 +3153,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            capture_finish_png,
+            shot_translate,
+            translate_text,
             sys_state,
             wifi_list,
             wifi_connect,

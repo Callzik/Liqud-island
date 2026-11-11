@@ -354,6 +354,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   // Opened from the tray: the hover logic is armed only once the cursor reaches
   // the island; if it never does, fold back after a while.
   const unarmedTimer = useRef(0);
+  const openRef = useRef<(t?: Tab, armed?: boolean) => void>(() => {});
   const openPanel = useCallback(
     (t?: Tab, armed = true) => {
       if (t) setTab(t);
@@ -387,6 +388,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     },
     [closePanel],
   );
+  openRef.current = openPanel;
 
   const bumpUsage = useCallback((target: string) => {
     setUsage((u) => ({ ...u, [target]: (u[target] ?? 0) + 1 }));
@@ -481,6 +483,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<Clip[]>("clips", setClips));
     subs.push(on<boolean>("suppressed", setSuppressed));
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
+    subs.push(on<Tab>("open-tab", (t) => openRef.current(t, false)));
     subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(on<Settings>("settings", setSettings));
     subs.push(

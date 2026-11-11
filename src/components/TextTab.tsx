@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { call } from "../api";
-import { counts, fixLayout, joinLines, lower, sentence, tidySpaces, translit, upper } from "../lib/textTools";
+import { capitalizeWords, counts, fixLayout, fromBase64, joinLines, jsonLine, jsonPretty, lower, sentence, tidySpaces, toBase64, translit, upper } from "../lib/textTools";
 import type { ToastData } from "./Toast";
 
 const TOOLS: { label: string; title: string; fn: (s: string) => string }[] = [
@@ -11,6 +11,11 @@ const TOOLS: { label: string; title: string; fn: (s: string) => string }[] = [
   { label: "Раскладка", title: "Ghbdtn → Привет и обратно", fn: fixLayout },
   { label: "Пробелы", title: "Убрать лишние пробелы и пустые строки", fn: tidySpaces },
   { label: "Переносы", title: "Склеить строки в абзацы", fn: joinLines },
+  { label: "Каждое Слово", title: "Заглавная в начале каждого слова", fn: capitalizeWords },
+  { label: "JSON красиво", title: "Отформатировать JSON с отступами", fn: jsonPretty },
+  { label: "JSON в строку", title: "Сжать JSON в одну строку", fn: jsonLine },
+  { label: "→ Base64", title: "Закодировать в Base64", fn: toBase64 },
+  { label: "Base64 →", title: "Раскодировать Base64", fn: fromBase64 },
 ];
 
 /** «Текст»: quick transforms over the clipboard text. */
@@ -35,12 +40,29 @@ export function TextTab({
     fromClipboard();
   }, []);
 
+  const [tr, setTr] = useState(false);
+  const translate = async () => {
+    setTr(true);
+    try {
+      const out = await call<string>("translate_text", { text, to: null });
+      setText(out);
+      await call("copy_text", { text: out }).catch(() => {});
+      toast({ icon: "text", title: "Перевод готов", subtitle: "Уже в буфере" }, 2000);
+    } catch (e) {
+      toast({ icon: "error", tone: "error", title: "Не удалось перевести", subtitle: String(e) }, 3500);
+    }
+    setTr(false);
+  };
+
   const c = counts(text);
   const nf = (n: number) => n.toLocaleString("ru-RU");
 
   return (
     <div className="tt">
       <div className="tt-tools">
+        <button className="tt-tool tt-accent" title="Русский ⇄ английский" disabled={!text || tr} onClick={translate}>
+          {tr ? "Перевожу…" : "Перевести"}
+        </button>
         {TOOLS.map((t) => (
           <button key={t.label} className="tt-tool" title={t.title} disabled={!text} onClick={() => setText(t.fn(text))}>
             {t.label}

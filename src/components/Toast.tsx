@@ -1,4 +1,4 @@
-import { call } from "../api";
+import { call, dragOut } from "../api";
 import { WeatherIcon } from "./WeatherIcon";
 import { IAlert, ICheck, ICopy, IDownload, IImage, IInbox, ILauncher, IMic, IPipette, IQr, IText, IVideo } from "./Icons";
 
@@ -20,6 +20,8 @@ export interface ToastData {
   /** colour sample shown instead of the icon */
   swatch?: string;
   actions?: ToastAction[];
+  /** file the thumbnail drags out as */
+  drag?: string;
   /** how long to show, ms */
   ms?: number;
 }
@@ -31,7 +33,18 @@ export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }
   return (
     <div className={`toast ${data.tone === "error" ? "toast-error" : ""}`}>
       {data.image ? (
-        <img className="toast-thumb" src={data.image} alt="" draggable={false} />
+        <img
+          className={`toast-thumb ${data.drag ? "can-drag" : ""}`}
+          src={data.image}
+          alt=""
+          draggable={false}
+          title={data.drag ? "Перетащите в чат или папку" : undefined}
+          onMouseDown={(e) => {
+            if (!data.drag || e.button !== 0) return;
+            e.stopPropagation();
+            dragOut([data.drag], data.drag);
+          }}
+        />
       ) : data.icon === "rain" ? (
         <div className="toast-icon">
           <WeatherIcon code={data.wx ?? 61} size={24} />
@@ -46,6 +59,7 @@ export function Toast({ data, onDone }: { data: ToastData; onDone?: () => void }
       <div className="toast-text">
         <div className="toast-title">{data.title}</div>
         {data.subtitle && <div className="toast-sub">{data.subtitle}</div>}
+        {data.drag && <div className="toast-hint">Перетащи превью в чат или папку</div>}
       </div>
       {data.actions && data.actions.length > 0 && (
         <div className="toast-actions">

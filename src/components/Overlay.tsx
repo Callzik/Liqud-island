@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as RMouseEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { call, isTauri, on } from "../api";
+import { Annotate, renderPng, type Op, type Rect } from "./Annotate";
 
 type Mode = "region" | "ocr" | "qr" | "picker" | "record";
 
@@ -15,7 +16,7 @@ interface Start {
 }
 
 const HINTS: Record<Mode, string> = {
-  region: "Выделите область — она попадёт в буфер",
+  region: "Выделите область — потом можно порисовать",
   ocr: "Выделите текст для распознавания",
   qr: "Выделите QR-код или кликните — поиск по всему экрану",
   picker: "Кликните, чтобы взять цвет",
@@ -39,6 +40,8 @@ export function Overlay() {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [color, setColor] = useState("#000000");
+  // region screenshot: the selection waits for drawing before it is saved
+  const [edit, setEdit] = useState<Rect | null>(null);
   const srcRef = useRef<HTMLCanvasElement | null>(null);
   const loupeRef = useRef<HTMLCanvasElement>(null);
   const startRef = useRef<Start | null>(null);
@@ -50,6 +53,7 @@ export function Overlay() {
     setReady(false);
     setDrag(null);
     setPos(null);
+    setEdit(null);
     srcRef.current = null;
   }, []);
 
@@ -154,8 +158,26 @@ export function Overlay() {
     return `#${hex2(px[0])}${hex2(px[1])}${hex2(px[2])}`.toUpperCase();
   };
 
+  const done = (ops: Op[]) => {
+    const s = start;
+    const sel = edit!;
+    const rect = { x: Math.round(sel.x * k), y: Math.round(sel.y * k), w: Math.round(sel.w * k), h: Math.round(sel.h * k) };
+    const src = srcRef.current;
+    if (!ops.length || !src) return finish(rect);
+    let png: string;
+    try {
+      png = renderPng(src, sel, src.width / window.innerWidth, ops);
+    } catch {
+      return finish(rect);
+    }
+    reset();
+    if (isTauri) call("capture_finish_png", { id: s.id, png: png.slice(png.indexOf(",") + 1) });
+    else console.info("capture_finish_png", png.length);
+  };
+
   const down = (e: RMouseEvent) => {
     if (e.button === 2) return cancel();
+    if (edit) return;
     if (e.button !== 0) return;
     // sample right under the click: no mousemove may have happened yet
     if (start.mode === "picker") return finish(null, colorAt(e.clientX, e.clientY) ?? color);
@@ -176,12 +198,19 @@ export function Overlay() {
       if (start.mode === "qr" || start.mode === "record") finish(null);
       return;
     }
+    if (start.mode === "region") {
+      setDrag(null);
+      setEdit({ x, y, w, h });
+      return;
+    }
     finish({ x: Math.round(x * k), y: Math.round(y * k), w: Math.round(w * k), h: Math.round(h * k) });
   };
 
-  const sel = drag
-    ? { x: Math.min(drag.x0, drag.x1), y: Math.min(drag.y0, drag.y1), w: Math.abs(drag.x1 - drag.x0), h: Math.abs(drag.y1 - drag.y0) }
-    : null;
+  const sel = edit
+    ? edit
+    : drag
+      ? { x: Math.min(drag.x0, drag.x1), y: Math.min(drag.y0, drag.y1), w: Math.abs(drag.x1 - drag.x0), h: Math.abs(drag.y1 - drag.y0) }
+      : null;
 
   const loupeLeft = pos ? (pos.x + LOUPE + 40 > window.innerWidth ? pos.x - LOUPE - 24 : pos.x + 24) : 0;
   const loupeTop = pos ? (pos.y + LOUPE + 64 > window.innerHeight ? pos.y - LOUPE - 48 : pos.y + 24) : 0;
@@ -197,10 +226,11 @@ export function Overlay() {
       <img className="ov-shot" src={url} crossOrigin="anonymous" alt="" draggable={false} onLoad={(e) => onLoad(e.currentTarget)} onError={() => isTauri && call("overlay_show", { id: start.id })} />
       {sel ? <div className="ov-sel" style={{ left: sel.x, top: sel.y, width: sel.w, height: sel.h }} /> : start.mode !== "picker" && <div className="ov-dim" />}
       {sel && (
-        <div className="ov-size" style={{ left: sel.x, top: sel.y + sel.h + 8 > window.innerHeight - 30 ? sel.y - 30 : sel.y + sel.h + 8 }}>
+        <div className="ov-size" style={edit ? { left: sel.x, top: Math.max(4, sel.y - 26) } : { left: sel.x, top: sel.y + sel.h + 8 > window.innerHeight - 30 ? sel.y - 30 : sel.y + sel.h + 8 }}>
           {Math.round(sel.w * k)} × {Math.round(sel.h * k)}
         </div>
       )}
+      {edit && <Annotate sel={edit} src={srcRef.current} onDone={done} onCancel={cancel} />}
       {pos && !sel && start.mode !== "picker" && (
         <>
           <div className="ov-cross-h" style={{ top: pos.y }} />
@@ -217,7 +247,7 @@ export function Overlay() {
         </div>
       )}
       <div className="ov-hint">
-        {HINTS[start.mode]} <span>· Esc — отмена</span>
+        {edit ? "Рисуйте на выделении" : HINTS[start.mode]} <span>{edit ? "· Enter — готово · Esc — отмена" : "· Esc — отмена"}</span>
       </div>
     </div>
   );
