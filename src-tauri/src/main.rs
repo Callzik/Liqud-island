@@ -1233,6 +1233,62 @@ fn volume_mute(state: St<'_>, muted: bool) {
 }
 
 /// Active output devices (for the "Динамики ⌄" menu).
+// ---------- control center ----------
+
+#[tauri::command]
+async fn sys_state() -> Result<native::sys::SysState, String> {
+    tauri::async_runtime::spawn_blocking(native::sys::state).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn wifi_list(scan: bool) -> Result<Vec<native::sys::Net>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if scan {
+            native::sys::wifi_scan();
+        }
+        native::sys::wifi_list()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn wifi_connect(ssid: String, password: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native::sys::wifi_connect(&ssid, password.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn wifi_disconnect() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(native::sys::wifi_disconnect).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sys_radio(kind: String, on: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native::sys::set_radio(&kind, on)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sys_dark(dark: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native::sys::set_dark_mode(dark)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sys_vpn(name: String, on: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native::sys::vpn_set(&name, on)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn sys_power(action: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || native::sys::power(&action)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn sys_settings(page: String) {
+    native::sys::open_settings(&page);
+}
+
 #[tauri::command]
 async fn audio_devices(state: St<'_>) -> Result<Vec<native::audio::OutputDevice>, String> {
     let (tx, rx) = channel();
@@ -3019,6 +3075,15 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            sys_state,
+            wifi_list,
+            wifi_connect,
+            wifi_disconnect,
+            sys_radio,
+            sys_dark,
+            sys_vpn,
+            sys_power,
+            sys_settings,
             init,
             set_hit,
             save_settings,

@@ -157,9 +157,41 @@ function mockAsk() {
   emitAgents();
 }
 
+const mockSys = { wifi: true, bluetooth: true, dark: true, ssid: "Home-5G", vpn: [{ name: "Работа", connected: false }] };
+const mockNets = [
+  { ssid: "Home-5G", signal: 92, secure: true, connected: true, known: true },
+  { ssid: "Cafe Wi-Fi", signal: 61, secure: false, connected: false, known: false },
+  { ssid: "Neighbour", signal: 38, secure: true, connected: false, known: false },
+];
+
 export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {}): Promise<T> {
   const r = (v: unknown) => Promise.resolve(v as T);
   switch (cmd) {
+    case "sys_state":
+      return r(mockSys);
+    case "wifi_list":
+      return r(mockNets);
+    case "wifi_connect":
+      mockNets.forEach((n) => (n.connected = n.ssid === args.ssid));
+      mockNets.forEach((n) => n.connected && (n.known = true));
+      mockSys.ssid = args.ssid;
+      return r(null);
+    case "wifi_disconnect":
+      mockNets.forEach((n) => (n.connected = false));
+      mockSys.ssid = "";
+      return r(null);
+    case "sys_radio":
+      (mockSys as any)[args.kind] = args.on;
+      return r(null);
+    case "sys_dark":
+      mockSys.dark = args.dark;
+      return r(null);
+    case "sys_vpn":
+      mockSys.vpn.forEach((v) => v.name === args.name && (v.connected = args.on));
+      return r(null);
+    case "sys_power":
+    case "sys_settings":
+      return r(null);
     case "init":
       (state as any).weather = demoWeather();
       return r({ ...state, cover: { id: 1, url: cover }, version: "0.1.0-dev", hotkeyError: null });

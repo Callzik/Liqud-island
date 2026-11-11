@@ -58,7 +58,9 @@ src-tauri/src/
   update.rs            автообновление: releases/latest → *-setup.exe в %TEMP% → запуск с /P /UPDATE /R
   agents.rs            агенты (как Lumio): хуки Claude Code (`island.exe --cc-hook` → TCP 127.0.0.1, порт в agents.port),
                        ответы на PermissionRequest / AskUserQuestion из острова, Codex по ~/.codex/sessions, установка хуков
-  native/              media (GSMTC), audio (Core Audio, IPolicyConfig), capture (GDI, OCR, QR), speech, clip, input
+  native/              sys (центр управления: Wi-Fi через wlanapi, радио Bluetooth/Wi-Fi через WinRT Radios, тёмная тема в реестре,
+                       VPN через RAS/rasdial, блокировка/сон/перезагрузка/выключение),
+                       media (GSMTC), audio (Core Audio, IPolicyConfig), capture (GDI, OCR, QR), speech, clip, input
                        (+ двойной Ctrl через WH_KEYBOARD_LL), shell, img, proc (дерево процессов → окно терминала)
 ```
 
@@ -73,7 +75,8 @@ update (через 30 с после старта и каждые 6 ч; тост 
 LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ctrl+Alt+Space`, Windows или Whisper), загрузки,
 вкладки «Текст» и «Заметки», жильцы, текст песни с подсветкой слов, ♥/«не рекомендовать» Яндекс Музыки,
 тема Liquid Glass / чёрная, режим «Без цензуры», прятанье в полноэкранных приложениях, автозапуск,
-агенты Claude Code / Codex (вкладки «Агенты» и «Офис», двойной Ctrl — офис).
+агенты Claude Code / Codex (вкладки «Агенты» и «Офис», двойной Ctrl — офис),
+вкладка «Управление» (ControlCenter.tsx: сети Wi-Fi с паролем, Bluetooth, тёмная тема Windows, VPN, питание).
 
 ## Интеграции — детали
 
@@ -107,7 +110,8 @@ LM Studio), погода (Open-Meteo + ipwho.is), голос → текст (`Ct
 
 Захват и запись экрана, OCR и распознавание речи, переключение устройства вывода, слежение за загрузками,
 скрытое окно YouTube и его медиасессия, стекло (частота и нагрузка снимков фона), спектр звука (loopback),
-агенты (хуки Claude Code под Git Bash, поиск окна терминала, двойной Ctrl, формат логов Codex).
+агенты (хуки Claude Code под Git Bash, поиск окна терминала, двойной Ctrl, формат логов Codex),
+центр управления (Wi-Fi профили, Radios без пакета MSIX, rasdial).
 
 ## Идеи на будущее (пользователь ещё не выбрал)
 

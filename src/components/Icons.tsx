@@ -392,3 +392,54 @@ export const CodexMark = ({ size = 14, color = "#8f94ff" }: { size?: number; col
     <path d="M3 4.4l1.8 1.6L3 7.6M6.2 8h2.8" stroke="#14141a" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+export const IWifi = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 9a14 14 0 0 1 19 0" />
+    <path d="M5.5 12.3a9.5 9.5 0 0 1 13 0" />
+    <path d="M8.6 15.5a5 5 0 0 1 6.8 0" />
+    <circle cx="12" cy="18.8" r="1" fill="currentColor" />
+  </Svg>
+);
+export const IBluetooth = (p: P) => (
+  <Svg {...p}>
+    <path d="m7 7 10 10-5 4V3l5 4L7 17" />
+  </Svg>
+);
+export const IMoon = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+  </Svg>
+);
+export const IContrast = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor" />
+  </Svg>
+);
+export const IShield = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3 5 6v5.5c0 4.3 3 7.9 7 9.5 4-1.6 7-5.2 7-9.5V6z" />
+  </Svg>
+);
+export const IRestart = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+    <path d="M20 4v4.5h-4.5" />
+  </Svg>
+);
+export const IList = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 7h12M8 12h12M8 17h12" />
+    <circle cx="4" cy="7" r=".6" fill="currentColor" />
+    <circle cx="4" cy="12" r=".6" fill="currentColor" />
+    <circle cx="4" cy="17" r=".6" fill="currentColor" />
+  </Svg>
+);
+export const IToggles = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4.5" width="18" height="6" rx="3" />
+    <circle cx="15" cy="7.5" r="1.6" fill="currentColor" />
+    <rect x="3" y="13.5" width="18" height="6" rx="3" />
+    <circle cx="9" cy="16.5" r="1.6" />
+  </Svg>
+);

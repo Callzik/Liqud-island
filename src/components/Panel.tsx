@@ -1,6 +1,6 @@
 import type { AgentsPayload, Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IBuilding, IChat, IClipboard, IHome, IInbox, ILyrics, INote, IPin, ISliders, ISun, ITerminal, ITextTool } from "./Icons";
+import { IBuilding, IChat, IClipboard, IHome, IInbox, ILyrics, INote, IPin, ISliders, ISun, ITerminal, ITextTool, IToggles } from "./Icons";
 import { AgentsTab } from "./AgentsTab";
 import { Office } from "./Office";
 import { needsYou } from "../lib/agents";
@@ -10,6 +10,7 @@ import { Chat } from "./Chat";
 import { Weather } from "./Weather";
 import { TextTab } from "./TextTab";
 import { NotesTab } from "./NotesTab";
+import { ControlCenter } from "./ControlCenter";
 import type { WeatherPayload } from "../lib/weather";
 import { ClipboardTab } from "./ClipboardTab";
 import { ShelfTab } from "./ShelfTab";
@@ -17,7 +18,7 @@ import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
 
-export type Tab = "home" | "clipboard" | "shelf" | "text" | "chat" | "notes" | "agents" | "office" | "weather" | "lyrics" | "settings";
+export type Tab = "home" | "clipboard" | "shelf" | "text" | "chat" | "notes" | "agents" | "office" | "weather" | "controls" | "lyrics" | "settings";
 
 // order as in the promo video; «Песня» (lyrics) comes last
 const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome; on?: (s: Settings) => boolean }[] = [
@@ -30,6 +31,7 @@ const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome; o
   { id: "agents", label: "Агенты", Icon: ITerminal, on: (s) => s.agentsEnabled },
   { id: "office", label: "Офис", Icon: IBuilding, on: (s) => s.agentsEnabled },
   { id: "weather", label: "Погода", Icon: ISun, on: (s) => s.weatherEnabled },
+  { id: "controls", label: "Управление", Icon: IToggles },
   { id: "lyrics", label: "Песня", Icon: ILyrics },
 ];
 
@@ -99,6 +101,7 @@ export function Panel(p: PanelProps) {
       </header>
       <section className="panel-body">
         {p.tab === "home" && <Home {...p} />}
+        {p.tab === "controls" && <ControlCenter />}
         {p.tab === "lyrics" && <Lyrics media={p.media} mediaAt={p.mediaAt} accent={p.accent} lyrics={p.lyrics} />}
         {p.tab === "chat" && (
           <Chat
