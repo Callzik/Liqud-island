@@ -4005,3 +4005,9 @@ html.is-overlay body {
 .recent-ago { font-size: 10.5px; color: var(--faint); flex-shrink: 0; }
 .theme-light .slider::-webkit-slider-runnable-track { background: linear-gradient(to right, #222 var(--p), rgba(0, 0, 0, 0.12) var(--p)); }
 .theme-light .slider::-webkit-slider-thumb { background: #222; }
+.chat-src { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); flex-shrink: 0; }
+.chat-src button { font-size: 11.5px; padding: 4px 10px; border-radius: 7px; color: var(--muted); }
+.chat-src button:hover { color: var(--text); }
+.chat-src button.on { background: var(--raised); color: var(--text); font-weight: 600; }
+.chat-head { gap: 10px; }
+.chat-head .chat-model { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

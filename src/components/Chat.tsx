@@ -186,6 +186,15 @@ export function Chat({ settings, toast, setBusy, ask, onAsked, setDropHandler, o
   return (
     <div className="chat">
       <div className="chat-head">
+        <div className="chat-src">
+          <button className="on">Остров</button>
+          <button onClick={() => call("ai_web", { site: "gemini" }).catch((e) => toast({ icon: "error", tone: "error", title: "Не открылся Gemini", subtitle: String(e) }))} title="Gemini в своём окне — войди в аккаунт Google один раз">
+            Gemini ↗
+          </button>
+          <button onClick={() => call("ai_web", { site: "deepseek" }).catch((e) => toast({ icon: "error", tone: "error", title: "Не открылся DeepSeek", subtitle: String(e) }))} title="DeepSeek в своём окне — войди в аккаунт один раз">
+            DeepSeek ↗
+          </button>
+        </div>
         <span className="chat-model" title={settings.aiUrl}>
           <IChat size={14} />
           {settings.aiModel || "модель сервера"} <i>· {server}</i>

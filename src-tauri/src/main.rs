@@ -2459,6 +2459,43 @@ fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) 
     let _ = media.control(&cmd.action, cmd.value);
 }
 
+/// Gemini / DeepSeek: the site itself in a tall window under the island, signed in with
+/// the user's own account (own WebView2 profile, so the login is remembered).
+#[tauri::command]
+fn ai_web(app: AppHandle, state: St<'_>, site: String) -> Result<(), String> {
+    let (label, url, title) = match site.as_str() {
+        "gemini" => ("aiweb-gemini", "https://gemini.google.com/app", "Gemini"),
+        "deepseek" => ("aiweb-deepseek", "https://chat.deepseek.com/", "DeepSeek"),
+        _ => return Err("неизвестный сайт".into()),
+    };
+    if let Some(w) = app.get_webview_window(label) {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    // a tall column under the island, centred on its monitor
+    let (mx, my, mw, mh, scale) = app
+        .get_webview_window("main")
+        .and_then(|m| m.current_monitor().ok().flatten())
+        .map(|m| (m.position().x, m.position().y, m.size().width, m.size().height, m.scale_factor()))
+        .unwrap_or((0, 0, 1920, 1080, 1.0));
+    let w = 520.0_f64;
+    let h = ((mh as f64 / scale) * 0.82).min(900.0);
+    let x = mx as f64 / scale + (mw as f64 / scale - w) / 2.0;
+    let y = my as f64 / scale + 56.0;
+    let dir = state.paths.dir.join("ai-webview");
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url.parse().map_err(|_| "bad url".to_string())?))
+        .title(title)
+        .inner_size(w, h)
+        .position(x, y)
+        .data_directory(dir)
+        .focused(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Opens (or reuses) the YouTube player window. Own WebView2 profile: the user
 /// signs in to YouTube there once; autoplay is allowed.
 async fn yt_open(app: &AppHandle, shared: &Shared, url: &str, visible: bool) -> Result<(), String> {
@@ -3165,6 +3202,7 @@ fn main() {
             capture_finish_png,
             shot_translate,
             translate_text,
+            ai_web,
             sys_state,
             wifi_list,
             wifi_connect,
