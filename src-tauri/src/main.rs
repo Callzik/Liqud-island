@@ -1295,6 +1295,45 @@ fn sys_settings(page: String) {
     native::sys::open_settings(&page);
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceItem {
+    app_id: String,
+    app: String,
+    title: String,
+    artist: String,
+    playing: bool,
+}
+
+/// Players that publish a media session right now (AIMP, Winamp with a plugin, browsers…).
+#[tauri::command]
+async fn media_sessions(state: St<'_>) -> Result<Vec<SourceItem>, String> {
+    let shared = state.inner().clone();
+    let hidden = lock(&shared.settings).media_hidden.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _com = util::Com::mta();
+        let media = Media::new().map_err(|e| e.to_string())?;
+        media.set_hidden(&hidden);
+        Ok(media
+            .sessions()
+            .into_iter()
+            .map(|m| SourceItem { app: media_app_name(&shared, &m.app_id), app_id: m.app_id, title: m.title, artist: m.artist, playing: m.playing })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn app_volume_get(app_id: String) -> Result<Option<f32>, String> {
+    tauri::async_runtime::spawn_blocking(move || native::audio::app_volume(&app_id)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn app_volume_set(app_id: String, level: f32) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || native::audio::set_app_volume(&app_id, level)).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn audio_devices(state: St<'_>) -> Result<Vec<native::audio::OutputDevice>, String> {
     let (tx, rx) = channel();
@@ -2437,6 +2476,10 @@ fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) 
         );
         return;
     }
+    if let Some(id) = cmd.action.strip_prefix("pick:") {
+        media.set_pick(Some(id));
+        return;
+    }
     if let Some(a) = cmd.action.strip_prefix("ym:") {
         let _ = media.control_of(YM, a, cmd.value);
         return;
@@ -3227,6 +3270,9 @@ fn main() {
             shot_translate,
             translate_text,
             ai_web,
+            media_sessions,
+            app_volume_get,
+            app_volume_set,
             sys_state,
             wifi_list,
             wifi_connect,

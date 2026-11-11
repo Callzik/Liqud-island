@@ -163,6 +163,7 @@ function mockAsk() {
 }
 
 let mockTimers: any[] = [];
+let mockAppVol = 0.4;
 setInterval(() => {
   const due = mockTimers.filter((t) => t.atMs <= Date.now());
   if (!due.length) return;
@@ -180,6 +181,17 @@ const mockNets = [
 export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {}): Promise<T> {
   const r = (v: unknown) => Promise.resolve(v as T);
   switch (cmd) {
+    case "media_sessions":
+      return r([
+        { appId: "AIMP.exe", app: "AIMP", title: "On & On", artist: "Cartoon", playing: true },
+        { appId: "winamp.exe", app: "Winamp", title: "Sunset Drive", artist: "", playing: false },
+        { appId: "Yandex.Music", app: "Яндекс Музыка", title: "Утро у моря", artist: "", playing: false },
+      ]);
+    case "app_volume_get":
+      return r(mockAppVol);
+    case "app_volume_set":
+      mockAppVol = args.level;
+      return r(true);
     case "timers_list":
       return r(mockTimers);
     case "timers_add":

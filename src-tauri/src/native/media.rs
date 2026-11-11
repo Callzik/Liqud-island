@@ -47,6 +47,8 @@ pub struct Media {
     last: std::cell::RefCell<Option<(MediaState, std::time::Instant)>>,
     /// app ids (lowercase) the user hid in the settings: never shown
     hidden: std::cell::RefCell<Vec<String>>,
+    /// player the user picked in the island's source list (app id, lowercase)
+    pick: std::cell::RefCell<Option<String>>,
 }
 
 /// How long a vanished state is still shown while its player stays in the list.
@@ -111,6 +113,7 @@ impl Media {
             active: std::cell::RefCell::new(None),
             last: std::cell::RefCell::new(None),
             hidden: std::cell::RefCell::new(Vec::new()),
+            pick: std::cell::RefCell::new(None),
         })
     }
 
@@ -123,6 +126,21 @@ impl Media {
         if *self.hidden.borrow() != ids {
             *self.hidden.borrow_mut() = ids;
         }
+    }
+
+    pub fn set_pick(&self, id: Option<&str>) {
+        *self.pick.borrow_mut() = id.map(|i| i.to_lowercase()).filter(|i| !i.is_empty());
+    }
+
+    /// Every visible session with what it plays (for the source list).
+    pub fn sessions(&self) -> Vec<MediaState> {
+        let Ok(list) = self.manager.GetSessions() else { return Vec::new() };
+        let n = list.Size().unwrap_or(0);
+        (0..n)
+            .filter_map(|i| list.GetAt(i).ok())
+            .filter(|s| !self.is_hidden(&app_of(s)))
+            .filter_map(|s| self.state_from(s))
+            .collect()
     }
 
     fn is_hidden(&self, id: &str) -> bool {
@@ -183,7 +201,10 @@ impl Media {
                 let preferred = !parts.is_empty() && parts.iter().any(|k| id.contains(k.as_str()));
                 let playing = matches!(status_of(&s), Some(Status::Playing) | Some(Status::Changing));
                 // a paused preferred player must not hide another app that plays
+                let picked = self.pick.borrow().as_deref() == Some(id.as_str());
                 let rank = match (preferred, playing) {
+                    // «без цензуры» still wins: it replaces the picked Yandex player
+                    (false, _) if picked && parts.is_empty() => 0,
                     (true, true) => 0,
                     (false, true) => 1,
                     (true, false) => 2,

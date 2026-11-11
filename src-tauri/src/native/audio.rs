@@ -189,3 +189,68 @@ impl Audio {
         }
     }
 }
+
+// ---------- one app's volume (the player), the rest of the sound untouched ----------
+
+/// Does the media-session app id belong to this executable? Classic apps report
+/// "AIMP.exe"-like ids, packaged ones "Vendor.App_hash!App"; both usually contain the exe name.
+fn app_matches(app_id: &str, exe_path: &str) -> bool {
+    let id = app_id.to_lowercase();
+    let stem = super::util::exe_stem(exe_path).to_lowercase();
+    if stem.is_empty() {
+        return false;
+    }
+    if id == format!("{stem}.exe") || id.ends_with(&format!("\\{stem}.exe")) {
+        return true;
+    }
+    let id_head = id.split(['!', '_']).next().unwrap_or("");
+    id_head.split('.').any(|part| part.len() > 2 && (part == stem || stem.contains(part))) || id.contains(&stem)
+}
+
+/// All volume controls of the sessions playing from `app_id` on the default device.
+fn app_volumes(app_id: &str) -> Vec<windows::Win32::Media::Audio::ISimpleAudioVolume> {
+    use windows::core::Interface;
+    use windows::Win32::Media::Audio::{IAudioSessionControl2, IAudioSessionManager2, ISimpleAudioVolume};
+    let _com = super::util::Com::mta();
+    let mut out = Vec::new();
+    unsafe {
+        let Ok(en) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else { return out };
+        let Ok(dev) = en.GetDefaultAudioEndpoint(eRender, eConsole) else { return out };
+        let Ok(mgr) = dev.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { return out };
+        let Ok(list) = mgr.GetSessionEnumerator() else { return out };
+        let n = list.GetCount().unwrap_or(0);
+        for i in 0..n {
+            let Ok(ctl) = list.GetSession(i) else { continue };
+            let Ok(ctl2) = ctl.cast::<IAudioSessionControl2>() else { continue };
+            let pid = ctl2.GetProcessId().unwrap_or(0);
+            if pid == 0 {
+                continue;
+            }
+            let Some(path) = super::util::process_exe_path(pid) else { continue };
+            if app_matches(app_id, &path) {
+                if let Ok(v) = ctl.cast::<ISimpleAudioVolume>() {
+                    out.push(v);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The player's own volume (0..1), None when its audio session isn't found.
+pub fn app_volume(app_id: &str) -> Option<f32> {
+    app_volumes(app_id).first().and_then(|v| unsafe { v.GetMasterVolume() }.ok())
+}
+
+pub fn set_app_volume(app_id: &str, level: f32) -> bool {
+    let vols = app_volumes(app_id);
+    for v in &vols {
+        unsafe {
+            let _ = v.SetMasterVolume(level.clamp(0.0, 1.0), std::ptr::null());
+            if level > 0.0 {
+                let _ = v.SetMute(false, std::ptr::null());
+            }
+        }
+    }
+    !vols.is_empty()
+}

@@ -4,7 +4,7 @@ import { css } from "../lib/color";
 import { ago, clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
 import { Cover } from "./Compact";
-import { ICheck, IChevron, IHeart, IHeartOff, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose } from "./Icons";
+import { ICheck, IChevron, IHeart, IHeartOff, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose, IMusic, ISwap } from "./Icons";
 import type { PanelProps } from "./Panel";
 
 function useTicker(active: boolean, ms = 250) {
@@ -75,6 +75,8 @@ function MediaCard({
     }
   };
   const now = useTicker(!!media?.playing || !media, media ? 250 : 1000);
+  const [sources, setSources] = useState(false);
+  if (media && sources) return <SourceList current={media.appId} onClose={() => setSources(false)} />;
   if (!media) {
     const d = new Date(now);
     return (
@@ -100,6 +102,9 @@ function MediaCard({
 
   return (
     <div className="card media-card">
+      <button className="src-btn" onClick={() => setSources(true)} title="Выбрать плеер">
+        <ISwap size={13} />
+      </button>
       <Cover url={cover} size={128} radius={18} />
       <div className="media-info">
         <div className="media-app">
@@ -233,20 +238,54 @@ function DeviceMenu({ volume }: Pick<PanelProps, "volume">) {
   );
 }
 
-function VolumeRow({ volume }: Pick<PanelProps, "volume">) {
+function VolumeRow({ volume, media }: Pick<PanelProps, "volume" | "media">) {
   const [local, setLocal] = useState<number | null>(null);
+  // "app": the slider moves only the player's own volume
+  const [scope, setScope] = useState<"all" | "app">("all");
+  const [appLevel, setAppLevel] = useState<number | null>(null);
   const last = useRef(0);
-  const level = local ?? Math.round(volume.level * 100);
+  const appId = media?.appId ?? "";
+  useEffect(() => {
+    if (scope !== "app" || !appId) return;
+    let alive = true;
+    const load = () =>
+      call<number | null>("app_volume_get", { appId }).then((v) => {
+        if (!alive) return;
+        if (v === null) setScope("all");
+        else setAppLevel(Math.round(v * 100));
+      });
+    load();
+    const t = window.setInterval(load, 2500);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [scope, appId]);
+  const appMode = scope === "app" && !!appId && appLevel !== null;
+  const level = local ?? (appMode ? appLevel! : Math.round(volume.level * 100));
   const send = (v: number, force = false) => {
     const t = Date.now();
     if (force || t - last.current > 40) {
       last.current = t;
-      call("volume_set", { level: v / 100 });
+      if (appMode) {
+        setAppLevel(v);
+        call("app_volume_set", { appId, level: v / 100 });
+      } else call("volume_set", { level: v / 100 });
     }
   };
-  const muted = volume.muted || level === 0;
+  const muted = !appMode && (volume.muted || level === 0);
   return (
     <div className="card volume-row">
+      {appId && (
+        <div className="vol-scope">
+          <button className={!appMode ? "on" : ""} onClick={() => setScope("all")} title="Громкость всего компьютера">
+            <ISpeaker size={13} />
+          </button>
+          <button className={appMode ? "on" : ""} onClick={() => setScope("app")} title={`Только ${media?.app ?? "плеер"} — остальной звук не меняется`}>
+            <IMusic size={13} />
+          </button>
+        </div>
+      )}
       <button className="icon-btn" onClick={() => call("volume_mute", { muted: !volume.muted })} title={volume.muted ? "Включить звук" : "Выключить звук"}>
         {muted ? <IMute size={18} /> : <IVolume size={18} />}
       </button>
@@ -272,6 +311,43 @@ function VolumeRow({ volume }: Pick<PanelProps, "volume">) {
       />
       <span className="volume-value">{level}</span>
       {volume.device && <DeviceMenu volume={volume} />}
+    </div>
+  );
+}
+
+interface Source {
+  appId: string;
+  app: string;
+  title: string;
+  artist: string;
+  playing: boolean;
+}
+
+/** «⇄»: every player that has a media session (AIMP, Winamp, browsers…); pick which one the island shows. */
+function SourceList({ current, onClose }: { current: string; onClose: () => void }) {
+  const [list, setList] = useState<Source[] | null>(null);
+  useEffect(() => {
+    call<Source[]>("media_sessions").then(setList).catch(() => setList([]));
+  }, []);
+  return (
+    <div className="card media-card src-list">
+      {list === null && <div className="hint">Ищу плееры…</div>}
+      {list?.length === 0 && <div className="hint">Других плееров не видно</div>}
+      {list?.map((s) => (
+        <button
+          key={s.appId}
+          className={`src-item ${s.appId === current ? "on" : ""}`}
+          onClick={() => {
+            call("media_control", { action: `pick:${s.appId}` });
+            onClose();
+          }}
+        >
+          {s.appId === current ? <ICheck size={13} /> : <i className={s.playing ? "src-dot on" : "src-dot"} />}
+          <span className="src-app">{s.app}</span>
+          <span className="src-title">{s.title || "—"}</span>
+          {s.playing && <IPlay size={11} />}
+        </button>
+      ))}
     </div>
   );
 }
@@ -392,7 +468,7 @@ export function Home(p: PanelProps) {
             <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} saveSettings={p.saveSettings} toast={p.toast} setTab={p.setTab} />
           )}
           {showRecent && <RecentClips clips={p.clips} onClose={p.onClose} setTab={p.setTab} />}
-          {showVolume && <VolumeRow volume={p.volume} />}
+          {showVolume && <VolumeRow volume={p.volume} media={p.media} />}
         </div>
       )}
       {tiles.length > 0 && (

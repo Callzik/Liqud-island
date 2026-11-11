@@ -4067,3 +4067,17 @@ html.is-overlay body {
 .idle-face { height: 100%; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 14px 3px; font-size: 13px; font-weight: 600; }
 .idle-face .wx-compact { height: auto; padding: 0; gap: 6px; }
 .toast-face { width: 44px; display: grid; place-items: center; flex-shrink: 0; }
+.media-card { position: relative; }
+.src-btn { position: absolute; top: 8px; right: 8px; width: 26px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--faint); background: var(--raised); z-index: 1; }
+.src-btn:hover { color: var(--text); }
+.src-list { flex-direction: column; align-items: stretch !important; gap: 2px; padding: 8px !important; overflow-y: auto; }
+.src-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: 12px; text-align: left; min-width: 0; }
+.src-item:hover { background: var(--card-hover); }
+.src-item.on { color: var(--text); }
+.src-app { font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); flex-shrink: 0; min-width: 70px; }
+.src-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.src-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); flex-shrink: 0; margin: 0 3px; }
+.src-dot.on { background: #34c759; }
+.vol-scope { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--raised); flex-shrink: 0; margin-left: 6px; }
+.vol-scope button { width: 24px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--faint); }
+.vol-scope button.on { background: var(--card); color: var(--text); }
