@@ -173,7 +173,7 @@ export type AgentStatus = "working" | "thinking" | "permission" | "question" | "
 
 export interface AgentSession {
   id: string;
-  source: "claude" | "codex";
+  source: "claude" | "codex" | "opencode";
   title: string;
   project: string;
   cwd: string;
@@ -199,6 +199,7 @@ export interface HookStatus {
   stale: boolean;
   claudeFound: boolean;
   codexFound: boolean;
+  opencodeFound: boolean;
   settingsPath: string;
 }
 

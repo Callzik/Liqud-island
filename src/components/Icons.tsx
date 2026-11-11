@@ -392,6 +392,22 @@ export const CodexMark = ({ size = 14, color = "#8f94ff" }: { size?: number; col
     <path d="M3 4.4l1.8 1.6L3 7.6M6.2 8h2.8" stroke="#14141a" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+/** opencode: a square with a cursor block. */
+export const OpencodeMark = ({ size = 14, color = "#5fd4a0" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" aria-hidden="true">
+    <rect x="1" y="1" width="10" height="10" rx="1.2" fill="none" stroke={color} strokeWidth="1.6" />
+    <rect x="4" y="4" width="4" height="4" fill={color} />
+  </svg>
+);
+/** The mark of an agent's tool, sized for a line of text. */
+export const AgentMark = ({ source, size, color }: { source: string; size: number; color: string }) =>
+  source === "claude" ? (
+    <ClaudeMark size={size} color={color} />
+  ) : source === "opencode" ? (
+    <OpencodeMark size={size * 0.85} color={color} />
+  ) : (
+    <CodexMark size={size * 0.85} color={color} />
+  );
 export const IWifi = (p: P) => (
   <Svg {...p}>
     <path d="M2.5 9a14 14 0 0 1 19 0" />

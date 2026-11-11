@@ -372,10 +372,20 @@ fn ras_active() -> Vec<RASCONNW> {
 
 pub fn vpn_list() -> Vec<Vpn> {
     let active: Vec<String> = ras_active().iter().map(|c| from_wide(&c.szEntryName)).collect();
-    ras_entries().into_iter().map(|name| Vpn { connected: active.contains(&name), name }).collect()
+    let mut list: Vec<Vpn> = ras_entries().into_iter().map(|name| Vpn { connected: active.contains(&name), name }).collect();
+    // DashVPN goes first: it is what the user really uses
+    if let Some(st) = dash::state() {
+        list.insert(0, Vpn { name: dash::NAME.into(), connected: st != "off" });
+    } else if dash::installed().is_some() {
+        list.insert(0, Vpn { name: dash::NAME.into(), connected: false });
+    }
+    list
 }
 
 pub fn vpn_set(name: &str, on: bool) -> Result<(), String> {
+    if name == dash::NAME {
+        return dash::set(on);
+    }
     if !on {
         for c in ras_active() {
             if from_wide(&c.szEntryName) == name {
@@ -390,6 +400,90 @@ pub fn vpn_set(name: &str, on: bool) -> Result<(), String> {
         Command::new("rasphone").args(["-d", name]).spawn().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// ---------- DashVPN (Callzik/DashVPN) ----------
+
+/// Dash runs elevated and listens on a named pipe for one-line commands: state / on / off / toggle.
+mod dash {
+    use std::io::{Read, Write};
+    use std::os::windows::process::CommandExt;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::time::Duration;
+
+    pub const NAME: &str = "Dash";
+    const PIPE: &str = r"\\.\pipe\Dash-control";
+
+    fn ask(cmd: &str) -> Option<String> {
+        // ERROR_PIPE_BUSY: another client is being served, try again a moment later
+        for _ in 0..5 {
+            match std::fs::OpenOptions::new().read(true).write(true).open(PIPE) {
+                Ok(mut f) => {
+                    f.write_all(format!("{cmd}\n").as_bytes()).ok()?;
+                    let mut out = String::new();
+                    f.read_to_string(&mut out).ok()?;
+                    let v: serde_json::Value = serde_json::from_str(out.trim()).ok()?;
+                    return v.get("state").and_then(|s| s.as_str()).map(str::to_string);
+                }
+                Err(e) if e.raw_os_error() == Some(231) => std::thread::sleep(Duration::from_millis(100)),
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+
+    /// "off" | "connecting" | "on" | "waiting"; None when Dash is not running (or too old).
+    pub fn state() -> Option<String> {
+        ask("state")
+    }
+
+    /// The copy Dash puts in Program Files when "start with Windows" is on.
+    pub fn installed() -> Option<PathBuf> {
+        let pf = std::env::var_os("ProgramW6432").or_else(|| std::env::var_os("ProgramFiles"))?;
+        let p = PathBuf::from(pf).join("Dash").join("Dash.exe");
+        p.is_file().then_some(p)
+    }
+
+    fn user_sid() -> Option<String> {
+        let out = Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]).creation_flags(super::NO_WINDOW).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.trim().rsplit(',').next().map(|s| s.trim_matches('"').to_string()).filter(|s| s.starts_with("S-"))
+    }
+
+    pub fn set(on: bool) -> Result<(), String> {
+        if ask(if on { "on" } else { "off" }).is_some() {
+            return Ok(());
+        }
+        if !on {
+            return Ok(()); // not running: already off
+        }
+        // not running: its logon task starts it elevated without a UAC prompt
+        let task = user_sid().map(|sid| format!(r"\Dash\Autostart-{sid}"));
+        let started = task
+            .map(|t| {
+                Command::new("schtasks").args(["/Run", "/TN", &t]).creation_flags(super::NO_WINDOW).status().map(|s| s.success()).unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if !started {
+            // no task: start it ourselves (Windows asks for admin rights)
+            let exe = installed().ok_or("Dash не найден. Включите в нём «Запускать вместе с Windows» или откройте его сами")?;
+            if !super::super::shell::run_as(&exe.to_string_lossy(), "--connect --tray") {
+                return Err("Dash не запустился".into());
+            }
+            return Ok(()); // --connect turns it on by itself
+        }
+        // started from the task (hidden, maybe without auto-connect): ask it once the pipe is up
+        std::thread::spawn(|| {
+            for _ in 0..40 {
+                std::thread::sleep(Duration::from_millis(500));
+                if ask("on").is_some() {
+                    return;
+                }
+            }
+        });
+        Ok(())
+    }
 }
 
 // ---------- power ----------

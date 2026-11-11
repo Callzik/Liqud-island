@@ -11,3 +11,4 @@ pub mod shell;
 pub mod speech;
 pub mod sys;
 pub mod util;
+pub mod winamp;

@@ -5,6 +5,7 @@ import type { AgentSession } from "../api";
 export const SOURCES = {
   claude: { name: "Claude Code", color: "#e07b53", short: "Claude" },
   codex: { name: "Codex", color: "#8f94ff", short: "Codex" },
+  opencode: { name: "opencode", color: "#5fd4a0", short: "opencode" },
 } as const;
 
 const PLACES: Record<string, { name: string; where: string; open: string }> = {

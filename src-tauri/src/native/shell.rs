@@ -180,6 +180,13 @@ pub fn open(target: &str) -> bool {
     r.0 as isize > 32
 }
 
+/// Starts a program elevated (UAC prompt).
+pub fn run_as(exe: &str, args: &str) -> bool {
+    let (verb, exe, args) = (wide("runas"), wide(exe), wide(args));
+    let r = unsafe { ShellExecuteW(None, pcwstr(&verb), pcwstr(&exe), pcwstr(&args), PCWSTR::null(), SW_SHOWNORMAL) };
+    r.0 as isize > 32
+}
+
 /// Opens Explorer with the item selected.
 pub fn reveal(path: &str) -> bool {
     let verb = wide("open");

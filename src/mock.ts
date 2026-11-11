@@ -171,7 +171,7 @@ setInterval(() => {
   due.forEach((t) => mockEmit("alarm", t));
   mockEmit("timers", mockTimers);
 }, 500);
-const mockSys = { wifi: true, bluetooth: true, dark: true, ssid: "Home-5G", vpn: [{ name: "Работа", connected: false }] };
+const mockSys = { wifi: true, bluetooth: true, dark: true, ssid: "Home-5G", vpn: [{ name: "Dash", connected: true }, { name: "Работа", connected: false }] };
 const mockNets = [
   { ssid: "Home-5G", signal: 92, secure: true, connected: true, known: true },
   { ssid: "Cafe Wi-Fi", signal: 61, secure: false, connected: false, known: false },
@@ -419,7 +419,7 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
     case "agents_list":
       return r(agentsPayload());
     case "agents_hooks":
-      return r({ installed: true, stale: false, claudeFound: true, codexFound: true, settingsPath: "C:\\Users\\me\\.claude\\settings.json" });
+      return r({ installed: true, stale: false, claudeFound: true, codexFound: true, opencodeFound: true, settingsPath: "C:\\Users\\me\\.claude\\settings.json" });
     case "agents_answer": {
       const a = agentList.find((x) => x.id === args.session);
       if (!a || !a.request || a.request.id !== args.request) return Promise.reject("Вопрос уже закрыт");

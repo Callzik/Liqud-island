@@ -37,6 +37,8 @@ pub struct Thumb {
 
 pub struct Media {
     manager: Manager,
+    /// the shown player is classic Winamp, driven through its window (no session)
+    winamp: std::cell::Cell<bool>,
     /// sessions whose app id contains this are shown first (the island's own
     /// YouTube player while «без цензуры» runs)
     prefer: std::cell::RefCell<Option<String>>,
@@ -114,6 +116,7 @@ impl Media {
             last: std::cell::RefCell::new(None),
             hidden: std::cell::RefCell::new(Vec::new()),
             pick: std::cell::RefCell::new(None),
+            winamp: std::cell::Cell::new(false),
         })
     }
 
@@ -140,7 +143,38 @@ impl Media {
             .filter_map(|i| list.GetAt(i).ok())
             .filter(|s| !self.is_hidden(&app_of(s)))
             .filter_map(|s| self.state_from(s))
+            .chain(self.winamp_state())
             .collect()
+    }
+
+    /// Classic Winamp, unless it already has a media session (plugin) or is hidden.
+    fn winamp_state(&self) -> Option<MediaState> {
+        if self.is_hidden(super::winamp::APP_ID) || self.apps().iter().any(|a| a.to_lowercase().contains("winamp")) {
+            return None;
+        }
+        super::winamp::state()
+    }
+
+    pub fn state(&self) -> Option<MediaState> {
+        let wa = self.winamp_state();
+        let pick = self.pick.borrow().clone();
+        let free = self.prefer.borrow().is_none();
+        if wa.is_some() && free && pick.as_deref() == Some(super::winamp::APP_ID) {
+            self.winamp.set(true);
+            return wa;
+        }
+        let st = self.session_state();
+        match (wa, &st) {
+            // Winamp plays and the session player does not (and nothing else was picked)
+            (Some(w), cur) if cur.as_ref().map_or(true, |c| w.playing && !c.playing && pick.is_none() && free) => {
+                self.winamp.set(true);
+                Some(w)
+            }
+            _ => {
+                self.winamp.set(false);
+                st
+            }
+        }
     }
 
     fn is_hidden(&self, id: &str) -> bool {
@@ -257,7 +291,7 @@ impl Media {
         self.candidates().into_iter().next()
     }
 
-    pub fn state(&self) -> Option<MediaState> {
+    fn session_state(&self) -> Option<MediaState> {
         let cands = self.candidates();
         let last = self.last.borrow().clone();
         for s in cands {
@@ -353,6 +387,9 @@ impl Media {
     }
 
     pub fn thumbnail(&self) -> Option<Thumb> {
+        if self.winamp.get() {
+            return None;
+        }
         let s = self.session()?;
         let props = s.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
         let reference = props.Thumbnail().ok()?;
@@ -384,6 +421,10 @@ impl Media {
     }
 
     pub fn control(&self, action: &str, value: f64) -> Result<()> {
+        if self.winamp.get() {
+            super::winamp::control(action, value);
+            return Ok(());
+        }
         let Some(s) = self.session() else { return Ok(()) };
         Self::run(&s, action, value)
     }

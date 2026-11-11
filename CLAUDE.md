@@ -84,6 +84,10 @@ LM Studio; кнопки Gemini/DeepSeek открывают сайт в своё�
 liquid.setBase, классы theme-light/theme-tinted), настраиваемая «Главная» (`homeHide`: плеер, «Недавно скопировано», громкость, плитки, ярлыки), режим «Без цензуры», прятанье в полноэкранных приложениях, автозапуск,
 агенты Claude Code / Codex (вкладки «Агенты» и «Офис», двойной Ctrl — офис),
 вкладка «Управление» (ControlCenter.tsx: сети Wi-Fi с паролем, Bluetooth, тёмная тема Windows, VPN, питание).
+VPN-плитка сначала показывает DashVPN (свой клиент пользователя, репо Callzik/DashVPN): канал `\\.\pipe\Dash-control`, строки state/on/off/toggle → JSON
+(нужен Dash с PR #49). Dash не запущен → `schtasks /Run /TN \Dash\Autostart-<SID>` (без UAC), иначе `Program Files\Dash\Dash.exe --connect --tray` через runas.
+Winamp без медиасессии (`native/winamp.rs`): окно `Winamp v1.x`, заголовок, WM_USER 104/105/106, WM_COMMAND 40044–40048; appId `winamp.exe`.
+opencode в «Агентах» (`opencode.rs`, только смотрим): `~/.local/share/opencode/storage` session/message/part — формат JSON-хранилища, догадка по исходникам.
 
 ## Интеграции — детали
 
@@ -119,7 +123,7 @@ liquid.setBase, классы theme-light/theme-tinted), настраиваема
 скрытое окно YouTube и его медиасессия, стекло (частота и нагрузка снимков фона), спектр звука (loopback),
 агенты (хуки Claude Code под Git Bash, поиск окна терминала, двойной Ctrl, формат логов Codex),
 центр управления (Wi-Fi профили, Radios без пакета MSIX, rasdial), звук в записи (MediaComposition),
-редактор скриншота и перевод (только в браузерном демо), громкость отдельного плеера (сопоставление AUMID с exe).
+редактор скриншота и перевод (только в браузерном демо), громкость отдельного плеера (сопоставление AUMID с exe), Winamp, opencode (новые версии могут хранить сессии иначе), канал DashVPN.
 
 ## Идеи на будущее (пользователь ещё не выбрал)
 

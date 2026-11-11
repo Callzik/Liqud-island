@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 import type { AgentSession, AgentsPayload } from "../api";
 import { agentName, doing, hash, isBusy, needsYou, SOURCES } from "../lib/agents";
 import { headline } from "./AgentsTab";
-import { ClaudeMark, CodexMark, IHand } from "./Icons";
+import { AgentMark, IHand } from "./Icons";
 
 export const ART_W = 394;
 export const ART_H = 245;
@@ -574,10 +574,8 @@ export function Office({ agents, onOpen }: { agents: AgentsPayload; onOpen: (id:
               >
                 {waiting ? (
                   <i className="office-dot" />
-                ) : s.source === "claude" ? (
-                  <ClaudeMark size={10} color={src.color} />
                 ) : (
-                  <CodexMark size={9} color={src.color} />
+                  <AgentMark source={s.source} size={10} color={src.color} />
                 )}
                 <b>{shortText(s.project || agentName(s), resting ? 12 : 16)}</b>
                 {!resting && <span>{doing(s)}</span>}
@@ -600,7 +598,7 @@ export function Office({ agents, onOpen }: { agents: AgentsPayload; onOpen: (id:
                 {s.request!.kind === "question" ? shortText(s.request!.summary, 34) : `Можно? ${shortText(s.request!.detail.replace(/^\$ /, ""), 26)}`}
               </div>
             ))}
-          {list.length === 0 && <div className="office-empty">Пока никого. Запустите claude или codex в терминале</div>}
+          {list.length === 0 && <div className="office-empty">Пока никого. Запустите claude, codex или opencode</div>}
         </div>
       </div>
     </div>

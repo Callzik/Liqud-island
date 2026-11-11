@@ -25,6 +25,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use crate::native::proc;
+
+#[path = "opencode.rs"]
+mod opencode;
 use crate::store::now_ms;
 
 /// How long a question / permission waits in the island before the terminal asks.
@@ -121,6 +124,7 @@ pub struct HookStatus {
     pub stale: bool,
     pub claude_found: bool,
     pub codex_found: bool,
+    pub opencode_found: bool,
     pub settings_path: String,
 }
 
@@ -816,6 +820,19 @@ struct CodexFile {
     last: String,
 }
 
+/// Runs `f` on the session `key`, creating it when missing (`fresh` = just created).
+fn with_session(key: &str, f: impl FnOnce(&mut Session, bool) -> bool) -> bool {
+    let Some(h) = hub() else { return false };
+    let mut all = lock(&h.sessions);
+    let fresh = !all.contains_key(key);
+    let mut s = all.remove(key).unwrap_or_else(|| Session { id: key.to_string(), ..Default::default() });
+    let changed = f(&mut s, fresh);
+    if !fresh || changed {
+        all.insert(key.to_string(), s);
+    }
+    changed
+}
+
 fn home() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -847,6 +864,8 @@ fn watch_loop() {
     let mut codex: HashMap<PathBuf, CodexFile> = HashMap::new();
     let mut claude: HashMap<PathBuf, ClaudeFile> = HashMap::new();
     let mut dirs: HashMap<PathBuf, i64> = HashMap::new();
+    let oc_root = opencode::root();
+    let mut oc: HashMap<String, opencode::OcFile> = HashMap::new();
     let mut tick = 0u32;
     loop {
         thread::sleep(Duration::from_secs(2));
@@ -889,7 +908,20 @@ fn watch_loop() {
                 changed |= claude_read(p, f, mt, now);
             }
         }
+        // opencode: sessions every 10 s, their newest messages every 2 s
+        if tick % 5 == 0 && oc_root.is_dir() {
+            changed |= opencode::discover(&oc_root, &mut oc, now);
+        }
+        for f in oc.values_mut() {
+            if now - f.mtime < 30 * 60 * 1000 {
+                changed |= opencode::read(&oc_root, f, now);
+            }
+        }
         changed |= forget(now, &mut codex, &mut claude);
+        if let Some(h) = hub() {
+            let all = lock(&h.sessions);
+            oc.retain(|_, f| all.contains_key(&f.key) || now - f.mtime < 30 * 60 * 1000);
+        }
         tick = tick.wrapping_add(1);
         if changed {
             emit();
@@ -1418,6 +1450,7 @@ pub fn hooks_status() -> HookStatus {
     let mut st = HookStatus {
         claude_found: home().join(".claude").is_dir(),
         codex_found: home().join(".codex").is_dir(),
+        opencode_found: opencode::root().is_dir(),
         settings_path: path.to_string_lossy().into_owned(),
         ..Default::default()
     };

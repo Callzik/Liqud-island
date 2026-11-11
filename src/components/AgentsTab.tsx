@@ -4,14 +4,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { call, type AgentQuestion, type AgentSession, type AgentsPayload, type HookStatus } from "../api";
 import { agentName, badge, elapsed, needsYou, isBusy, place, SOURCES } from "../lib/agents";
-import { ClaudeMark, CodexMark, IBack, ICheck, IHand, ITerminal } from "./Icons";
+import { AgentMark, IBack, ICheck, IHand, ITerminal } from "./Icons";
 import type { ToastData } from "./Toast";
 
 export function SourceTag({ s }: { s: AgentSession }) {
   const src = SOURCES[s.source];
   return (
     <span className="ag-src" style={{ color: src.color }}>
-      {s.source === "claude" ? <ClaudeMark size={13} color={src.color} /> : <CodexMark size={12} color={src.color} />}
+      <AgentMark source={s.source} size={13} color={src.color} />
       {src.name}
       {s.client && <em className="ag-place">{place(s).name}</em>}
     </span>
@@ -140,7 +140,7 @@ export function AgentsTab({
             <>
               <div className="ag-empty-title">Пока никто не работает</div>
               <div className="hint">
-                Начните сессию Claude Code или Codex — в терминале, в приложении Claude или в VS Code. Она появится здесь. Двойной
+                Начните сессию Claude Code, Codex или opencode — в терминале, в приложении Claude или в VS Code. Она появится здесь. Двойной
                 Ctrl — офис.
               </div>
             </>

@@ -282,7 +282,7 @@ export default function App({ boot }: { boot: InitPayload }) {
         case "rec":
           return [255, 77, 77, 0.95];
         case "agent":
-          return alert?.source === "codex" ? [143, 148, 255, 0.95] : [224, 123, 83, 0.95];
+          return alert?.source === "codex" ? [143, 148, 255, 0.95] : alert?.source === "opencode" ? [95, 212, 160, 0.95] : [224, 123, 83, 0.95];
         case "download":
           return [110, 180, 255, 0.85];
         case "music":

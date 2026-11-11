@@ -2,7 +2,7 @@
 
 import type { AgentSession } from "../api";
 import { agentName, place, SOURCES } from "../lib/agents";
-import { ClaudeMark, CodexMark } from "./Icons";
+import { AgentMark } from "./Icons";
 
 export function AgentPill({ s, more }: { s: AgentSession; more: number }) {
   const src = SOURCES[s.source];
@@ -12,7 +12,7 @@ export function AgentPill({ s, more }: { s: AgentSession; more: number }) {
   return (
     <div className="agent-pill">
       <div className="agent-pill-icon" style={{ color: src.color }}>
-        {s.source === "claude" ? <ClaudeMark size={26} color={src.color} /> : <CodexMark size={22} color={src.color} />}
+        <AgentMark source={s.source} size={26} color={src.color} />
       </div>
       <div className="agent-pill-text">
         <div className="agent-pill-title">
