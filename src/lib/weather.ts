@@ -15,6 +15,8 @@ export interface Hour {
   prob: number;
   code: number;
   day: boolean;
+  pressure: number; // hPa
+  rain: number; // mm
 }
 
 export interface Day {
@@ -23,6 +25,10 @@ export interface Day {
   min: number;
   max: number;
   code: number;
+  sunrise: number; // unix ms
+  sunset: number;
+  uv: number;
+  rain: number; // mm
 }
 
 export interface Now {
@@ -33,6 +39,11 @@ export interface Now {
   code: number;
   day: boolean;
   precipitation: number;
+  windDir: number; // degrees, where the wind comes from
+  gusts: number;
+  pressure: number; // hPa
+  dew: number;
+  uv: number;
 }
 
 export function sky(code: number): Sky {
@@ -101,6 +112,11 @@ export function parse(w: WeatherPayload) {
     code: c.weather_code ?? 0,
     day: c.is_day !== 0,
     precipitation: c.precipitation ?? 0,
+    windDir: c.wind_direction_10m ?? 0,
+    gusts: c.wind_gusts_10m ?? 0,
+    pressure: c.surface_pressure ?? 1013,
+    dew: c.dew_point_2m ?? 0,
+    uv: c.uv_index ?? 0,
   };
   const h = d.hourly ?? {};
   const hours: Hour[] = (h.time ?? []).map((t: string, i: number) => ({
@@ -110,6 +126,8 @@ export function parse(w: WeatherPayload) {
     prob: h.precipitation_probability?.[i] ?? 0,
     code: h.weather_code?.[i] ?? 0,
     day: h.is_day?.[i] !== 0,
+    pressure: h.surface_pressure?.[i] ?? 0,
+    rain: h.precipitation?.[i] ?? 0,
   }));
   const dl = d.daily ?? {};
   const days: Day[] = (dl.time ?? []).map((t: string, i: number) => {
@@ -121,6 +139,10 @@ export function parse(w: WeatherPayload) {
       min: dl.temperature_2m_min?.[i] ?? 0,
       max: dl.temperature_2m_max?.[i] ?? 0,
       code: dl.weather_code?.[i] ?? 0,
+      sunrise: dl.sunrise?.[i] ? toMs(dl.sunrise[i], off) : 0,
+      sunset: dl.sunset?.[i] ? toMs(dl.sunset[i], off) : 0,
+      uv: dl.uv_index_max?.[i] ?? 0,
+      rain: dl.precipitation_sum?.[i] ?? 0,
     };
   });
   return { now, hours, days };
@@ -143,4 +165,38 @@ export function rainSoon(w: WeatherPayload, at = Date.now()): Hour | null {
   // an hourly slot that starts between +30 and +90 min covers the 60–90 min window
   const h = hours.find((x) => x.t > at + 30 * 60e3 && x.t <= at + 90 * 60e3);
   return h && h.prob >= 60 ? h : null;
+}
+
+export const mmHg = (hpa: number) => Math.round(hpa * 0.750062);
+
+const DIRS = ["северный", "северо-восточный", "восточный", "юго-восточный", "южный", "юго-западный", "западный", "северо-западный"];
+export const windName = (deg: number) => DIRS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+
+export function uvLabel(uv: number) {
+  if (uv < 3) return "низкий";
+  if (uv < 6) return "умеренный";
+  if (uv < 8) return "высокий";
+  if (uv < 11) return "очень высокий";
+  return "экстремальный";
+}
+
+/** Pressure change over the next 3 hours: "растёт" / "падает" / "стабильно". */
+export function pressureTrend(hours: Hour[], at = Date.now()) {
+  const i = hours.findIndex((h) => h.t + 3600e3 > at);
+  if (i < 0 || !hours[i + 3]?.pressure) return "стабильно";
+  const d = hours[i + 3].pressure - hours[i].pressure;
+  return d > 0.6 ? "растёт" : d < -0.6 ? "падает" : "стабильно";
+}
+
+/** "Сутки без осадков, ночью до 7°" — a one-line summary of the next 24 hours. */
+export function daySummary(hours: Hour[], at = Date.now()) {
+  const next = next24(hours, at);
+  if (!next.length) return "";
+  const wet = next.find((h) => h.prob >= 50 || h.rain > 0.2);
+  const night = next.filter((h) => !h.day);
+  const lo = night.length ? Math.min(...night.map((h) => h.temp)) : null;
+  const tail = lo !== null ? `, ночью до ${deg(lo)}` : "";
+  if (!wet) return `Сутки без осадков${tail}`;
+  const k = sky(wet.code) === "snow" ? "снег" : "дождь";
+  return wet === next[0] ? `Сейчас ${k}${tail}` : `В ${wet.label} ${k} (${wet.prob}%)${tail}`;
 }

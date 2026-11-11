@@ -422,13 +422,17 @@ function demoWeather() {
     fetchedMs: Date.now(),
     data: {
       utc_offset_seconds: off,
-      current: { temperature_2m: 15.4, apparent_temperature: 13.9, relative_humidity_2m: 71, wind_speed_10m: 3.4, weather_code: 2, is_day: 1, precipitation: 0 },
-      hourly: { time, temperature_2m: temp, precipitation_probability: prob, weather_code: code, is_day: isDay },
+      current: { temperature_2m: 15.4, apparent_temperature: 13.9, relative_humidity_2m: 71, wind_speed_10m: 3.4, wind_direction_10m: 225, wind_gusts_10m: 7.2, weather_code: 2, is_day: 1, precipitation: 0, surface_pressure: 1001, dew_point_2m: 8.2, uv_index: 2.1 },
+      hourly: { time, temperature_2m: temp, precipitation_probability: prob, weather_code: code, is_day: isDay, surface_pressure: time.map((_, i) => 1000 + i * 0.4), precipitation: prob.map((p) => (p > 50 ? 0.8 : 0)) },
       daily: {
         time: days,
         weather_code: [2, 61, 3, 0, 71, 95, 1],
         temperature_2m_min: [7, 5, 4, 2, -1, 6, 3],
         temperature_2m_max: [16, 12, 10, 11, 4, 14, 9],
+        sunrise: days.map((d) => d + "T06:19"),
+        sunset: days.map((d) => d + "T16:53"),
+        uv_index_max: [2.4, 1.8, 1.2, 3.1, 0.9, 2.2, 1.5],
+        precipitation_sum: [1.6, 4.2, 0, 0, 2.1, 6.5, 0],
       },
     },
   };

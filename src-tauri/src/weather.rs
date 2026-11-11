@@ -92,11 +92,11 @@ pub async fn forecast(lat: f64, lon: f64) -> Result<serde_json::Value, String> {
             ("longitude", format!("{lon:.4}")),
             (
                 "current",
-                "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day,precipitation"
+                "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,is_day,precipitation,surface_pressure,dew_point_2m,uv_index"
                     .into(),
             ),
-            ("hourly", "temperature_2m,precipitation_probability,weather_code,is_day".into()),
-            ("daily", "weather_code,temperature_2m_max,temperature_2m_min".into()),
+            ("hourly", "temperature_2m,precipitation_probability,weather_code,is_day,surface_pressure,precipitation".into()),
+            ("daily", "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_sum".into()),
             ("wind_speed_unit", "ms".into()),
             ("timezone", "auto".into()),
             ("forecast_days", "7".into()),
