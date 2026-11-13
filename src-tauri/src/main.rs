@@ -2503,13 +2503,20 @@ fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) 
     let _ = media.control(&cmd.action, cmd.value);
 }
 
-/// Gemini / DeepSeek: the site itself in a tall window under the island, signed in with
-/// the user's own account (own WebView2 profile, so the login is remembered).
+/// Gemini / DeepSeek / translator: the site itself in a tall window under the island, signed
+/// in with the user's own account (own WebView2 profile, so the login is remembered).
+/// Must be async: a window built inside a sync command deadlocks WebView2 on Windows and
+/// stays an empty grey frame.
 #[tauri::command]
-fn ai_web(app: AppHandle, state: St<'_>, site: String) -> Result<(), String> {
+async fn ai_web(app: AppHandle, state: St<'_>, site: String) -> Result<(), String> {
     let (label, url, title) = match site.as_str() {
         "gemini" => ("aiweb-gemini", "https://gemini.google.com/app", "Gemini"),
         "deepseek" => ("aiweb-deepseek", "https://chat.deepseek.com/", "DeepSeek"),
+        "translate" => (
+            "aiweb-translate",
+            "https://translate.google.com/?sl=auto&tl=ru&op=translate",
+            "Переводчик",
+        ),
         _ => return Err("неизвестный сайт".into()),
     };
     if let Some(w) = app.get_webview_window(label) {

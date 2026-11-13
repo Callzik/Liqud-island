@@ -194,6 +194,9 @@ export function Chat({ settings, toast, setBusy, ask, onAsked, setDropHandler, o
           <button onClick={() => call("ai_web", { site: "deepseek" }).catch((e) => toast({ icon: "error", tone: "error", title: "Не открылся DeepSeek", subtitle: String(e) }))} title="DeepSeek в своём окне — войди в аккаунт один раз">
             DeepSeek ↗
           </button>
+          <button onClick={() => call("ai_web", { site: "translate" }).catch((e) => toast({ icon: "error", tone: "error", title: "Не открылся переводчик", subtitle: String(e) }))} title="Google Переводчик в своём окне: любой язык → русский">
+            Перевод ↗
+          </button>
         </div>
         <span className="chat-model" title={settings.aiUrl}>
           <IChat size={14} />
