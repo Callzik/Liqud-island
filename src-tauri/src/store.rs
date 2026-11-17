@@ -122,7 +122,7 @@ pub struct Settings {
     pub residents: Vec<String>,
     /// Yandex Music OAuth token (like / dislike), kept only in this file.
     pub ym_token: String,
-    /// Look of the island: "black" (solid) or "glass" (frosted, see-through).
+    /// Look of the island: "black" (solid) or "glass" (refracts the backdrop).
     pub theme: String,
     /// YouTube Data API key for «Без цензуры» (optional; without it the search page opens).
     pub yt_key: String,

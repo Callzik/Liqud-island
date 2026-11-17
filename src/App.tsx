@@ -462,6 +462,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   useEffect(() => {
     let enterT = 0;
     let leaveT = 0;
+    let disposed = false;
     const subs: Promise<() => void>[] = [];
 
     subs.push(
@@ -539,14 +540,32 @@ export default function App({ boot }: { boot: InitPayload }) {
     );
     subs.push(on<WeatherPayload>("weather", setWeather));
     subs.push(on<Settings>("settings", setSettings));
-    subs.push(
-      on<{ x: number; y: number; w: number; h: number; id?: number; url?: string }>("backdrop", (b) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => liquidRef.current?.setBackdrop(img, b.x, b.y, b.w, b.h);
-        img.src = b.url ?? convertFileSrc(String(b.id ?? 0), "backdrop");
-      }),
-    );
+    type BackdropFrame = { x: number; y: number; w: number; h: number; id?: number; url?: string };
+    let loadingBackdrop = false;
+    let pendingBackdrop: BackdropFrame | null = null;
+    const loadBackdrop = (b: BackdropFrame) => {
+      loadingBackdrop = true;
+      const img = new Image();
+      const finish = () => {
+        loadingBackdrop = false;
+        const next = pendingBackdrop;
+        pendingBackdrop = null;
+        if (!disposed && next) loadBackdrop(next);
+      };
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        if (!disposed) liquidRef.current?.setBackdrop(img, b.x, b.y, b.w, b.h);
+        finish();
+      };
+      img.onerror = finish;
+      img.src = b.url ?? convertFileSrc(String(b.id ?? 0), "backdrop");
+    };
+    subs.push(on<BackdropFrame>("backdrop", (b) => {
+      if (disposed) return;
+      // A slow decode keeps only the most recent pending frame.
+      if (loadingBackdrop) pendingBackdrop = b;
+      else loadBackdrop(b);
+    }));
     subs.push(on<VoiceState>("voice", setVoice));
     subs.push(on<RecordingState>("recording", setRec));
     subs.push(on<DownloadProgress | null>("download", setDownload));
@@ -607,6 +626,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     // app list in the background so the first Alt+Space is instant
     const t = window.setTimeout(() => loadApps(true), 2500);
     return () => {
+      disposed = true;
       window.clearTimeout(t);
       subs.forEach((p) => p.then((un) => un()));
     };

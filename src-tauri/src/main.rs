@@ -19,7 +19,7 @@ mod weather;
 mod ym;
 mod yt;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
@@ -216,8 +216,8 @@ struct Shared {
     yt_active: AtomicBool,
     /// track that could not be found on YouTube: Yandex plays it itself
     yt_failed: Mutex<String>,
-    /// latest glass backdrop (id, BMP) for the backdrop:// protocol
-    backdrop: Mutex<Option<(u32, Arc<Vec<u8>>)>>,
+    /// Recent glass backdrops (id, BMP) for the backdrop:// protocol.
+    backdrop: Mutex<VecDeque<(u32, Arc<Vec<u8>>)>>,
     backdrop_seq: AtomicU32,
     /// players seen since start (id, name) for the «Скрыть плеер» setting
     media_apps: Mutex<Vec<(String, String)>>,
@@ -1761,72 +1761,98 @@ struct Backdrop {
     id: u32,
 }
 
-/// Glass look: a small, downscaled copy of the screen behind the island, a few
-/// times a second; the canvas draws it blurred inside the liquid shape.
+/// Capture the desktop region used as the texture for the refractive glass.
 fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
     thread::Builder::new()
         .name("backdrop".into())
         .spawn(move || {
             let mut excluded = false;
-            let mut last_hash = 0u64;
+            let mut last_hash = None;
+            let mut last_hit = Rect::default();
+            let mut transition_hit = Rect::default();
+            let mut transition_until = std::time::Instant::now();
             loop {
+                let started = std::time::Instant::now();
                 let glass = lock(&shared.settings).theme == "glass";
                 let own = shared.own_hwnd.load(Ordering::Relaxed);
                 let want_excluded = glass || lock(&shared.recording).is_some();
                 if want_excluded != excluded && own != 0 {
                     capture::exclude_from_capture(own, want_excluded);
                     excluded = want_excluded;
+                    if glass {
+                        // Give DWM time to remove the window from the captured image.
+                        thread::sleep(Duration::from_millis(60));
+                    }
                 }
                 if !glass || shared.suppressed.load(Ordering::Relaxed) {
+                    last_hash = None;
+                    last_hit = Rect::default();
+                    transition_hit = Rect::default();
+                    transition_until = started;
+                    lock(&shared.backdrop).clear();
                     thread::sleep(Duration::from_millis(400));
                     continue;
                 }
                 let hit = *lock(&shared.hit);
-                // the collapsed island is small and barely moves: fewer snapshots
-                let pause = if hit.h > 60.0 { 140 } else { 320 };
-                thread::sleep(Duration::from_millis(pause));
+                // The larger panel moves more pixels per capture.
+                let interval = Duration::from_millis(if hit.h > 90.0 { 50 } else { 33 });
                 let geom = *lock(&shared.geom);
-                let hit = *lock(&shared.hit);
                 if geom.scale <= 0.0 || hit.w <= 0.0 {
+                    thread::sleep(interval);
                     continue;
                 }
-                // a margin around the island: the spring animation overshoots it
-                let x = (hit.x - 40.0).max(0.0);
-                let y = 0.0;
-                let w = (hit.w + 80.0).min(WIN_W - x);
-                let h = (hit.h + 70.0).min(WIN_H);
-                let (px, py) = (geom.x + (x * geom.scale) as i32, geom.y + (y * geom.scale) as i32);
-                let (pw, ph) = ((w * geom.scale) as u32, (h * geom.scale) as u32);
+                // Hit boxes move instantly. Keep the previous area covered while
+                // the drawn outline springs to the new size.
+                if hit != last_hit {
+                    let previous = if started < transition_until { transition_hit } else { last_hit };
+                    let left = if previous.w > 0.0 { hit.x.min(previous.x) } else { hit.x };
+                    let right = (hit.x + hit.w).max(previous.x + previous.w);
+                    transition_hit = Rect { x: left, y: 0.0, w: right - left, h: hit.h.max(previous.h) };
+                    transition_until = started + Duration::from_millis(360);
+                    last_hit = hit;
+                }
+                let hit = if started < transition_until { transition_hit } else { hit };
+                // Include pixels outside the outline for the spring motion and refraction.
+                let left = ((hit.x - 48.0) * geom.scale).round().max(0.0) as i32;
+                let right = ((hit.x + hit.w + 48.0).min(WIN_W) * geom.scale).round() as i32;
+                let (px, py) = (geom.x + left, geom.y);
+                let pw = (right - left).max(0) as u32;
+                let ph = ((hit.h + 88.0).min(WIN_H) * geom.scale).round() as u32;
                 if pw < 4 || ph < 4 {
+                    thread::sleep(interval);
                     continue;
                 }
-                // it gets blurred anyway: a small image is plenty; GDI shrinks it
-                // while copying, and it goes out as a BMP (no PNG encoding, no base64)
-                let Some((sw, sh, small)) = capture::grab_scaled(px, py, pw, ph, 240) else { continue };
-                let hash = {
+                if let Some((sw, sh, pixels)) = capture::grab_scaled(px, py, pw, ph, 960) {
                     use std::hash::{Hash, Hasher};
-                    let mut hs = std::collections::hash_map::DefaultHasher::new();
-                    small.hash(&mut hs);
-                    (x as i64, w as i64, h as i64).hash(&mut hs);
-                    hs.finish()
-                };
-                if hash == last_hash {
-                    continue;
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    (left, pw, ph, sw, sh, geom.scale.to_bits()).hash(&mut hasher);
+                    pixels.hash(&mut hasher);
+                    let hash = hasher.finish();
+                    if last_hash != Some(hash) {
+                        last_hash = Some(hash);
+                        let id = shared.backdrop_seq.fetch_add(1, Ordering::Relaxed) + 1;
+                        let bmp = Arc::new(capture::bmp(&pixels, sw, sh));
+                        {
+                            let mut frames = lock(&shared.backdrop);
+                            if frames.len() >= 3 {
+                                frames.pop_front();
+                            }
+                            frames.push_back((id, bmp));
+                        }
+                        let _ = app.emit_to(
+                            EventTarget::webview_window("main"),
+                            "backdrop",
+                            Backdrop {
+                                id,
+                                x: f64::from(left) / geom.scale,
+                                y: 0.0,
+                                w: f64::from(pw) / geom.scale,
+                                h: f64::from(ph) / geom.scale,
+                            },
+                        );
+                    }
                 }
-                last_hash = hash;
-                let id = shared.backdrop_seq.fetch_add(1, Ordering::Relaxed) + 1;
-                *lock(&shared.backdrop) = Some((id, Arc::new(capture::bmp(&small, sw, sh))));
-                let _ = app.emit_to(
-                    EventTarget::webview_window("main"),
-                    "backdrop",
-                    Backdrop {
-                        x,
-                        y,
-                        w,
-                        h,
-                        id,
-                    },
-                );
+                thread::sleep(interval.saturating_sub(started.elapsed()));
             }
         })
         .expect("failed to start backdrop thread");
@@ -3154,16 +3180,16 @@ fn main() {
         .register_uri_scheme_protocol("backdrop", |ctx, req| {
             let shared = ctx.app_handle().state::<Arc<Shared>>();
             let want: u32 = req.uri().path().trim_matches('/').parse().unwrap_or(0);
-            // a slightly older id is fine too: the newest picture is always what we want
-            let body = lock(&shared.backdrop)
-                .as_ref()
-                .filter(|(id, _)| *id >= want)
-                .map(|(_, b)| b.as_ref().clone());
+            // Keep each image paired with the screen rectangle announced for that id.
+            let frame = lock(&shared.backdrop)
+                .iter()
+                .find(|(id, _)| *id == want)
+                .map(|(_, bmp)| Arc::clone(bmp));
             let builder = tauri::http::Response::builder()
                 .header("Access-Control-Allow-Origin", "*")
                 .header("Cache-Control", "no-store");
-            match body {
-                Some(b) => builder.header("Content-Type", "image/bmp").body(b),
+            match frame {
+                Some(bmp) => builder.header("Content-Type", "image/bmp").body(bmp.as_ref().clone()),
                 None => builder.status(404).body(Vec::new()),
             }
             .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
@@ -3217,7 +3243,7 @@ fn main() {
                 ym: Mutex::new(ym::Cache::default()),
                 yt_active: AtomicBool::new(false),
                 yt_failed: Mutex::new(String::new()),
-                backdrop: Mutex::new(None),
+                backdrop: Mutex::new(VecDeque::with_capacity(3)),
                 backdrop_seq: AtomicU32::new(0),
                 media_apps: Mutex::new(Vec::new()),
             });

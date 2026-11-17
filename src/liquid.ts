@@ -2,6 +2,8 @@
 // Size changes are spring-driven (slight jelly overshoot), the bottom edge
 // stretches toward the cursor and ripples with the system audio level.
 
+import type { GlassRenderer, GlassBackdrop } from "./glass";
+
 export interface LiquidTarget {
   w: number;
   h: number;
@@ -83,9 +85,10 @@ export class Liquid {
   private base = "#000";
   private tintTarget: [number, number, number, number] = [0, 0, 0, 0];
   private shadow = new Spring(0, 80, 18);
-  /** glass look: the screen behind the island, blurred inside the shape */
+  /** Screen behind the island, refracted along the animated edges. */
   private glass = false;
-  private backdrop: { img: HTMLImageElement; x: number; y: number; w: number; h: number } | null = null;
+  private backdrop: GlassBackdrop | null = null;
+  private glassRenderer: GlassRenderer | null = null;
   private springs = [this.w, this.h, this.r, this.pull, this.pullX, this.wave, this.bars, this.shadow, this.spikes];
 
   private level = 0;
@@ -129,6 +132,7 @@ export class Liquid {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
     window.removeEventListener("resize", this.onResize);
+    this.glassRenderer?.destroy();
     this.onBox = null;
   }
 
@@ -182,8 +186,29 @@ export class Liquid {
   setGlass(on: boolean) {
     if (this.glass === on) return;
     this.glass = on;
-    if (!on) this.backdrop = null;
+    if (on) {
+      this.loadGlassRenderer();
+    } else {
+      this.glassRenderer?.destroy();
+      this.glassRenderer = null;
+      this.backdrop = null;
+    }
     this.kick();
+  }
+
+  private loadGlassRenderer() {
+    void import("./glass").then(({ GlassRenderer }) => {
+      if (this.destroyed || !this.glass || this.glassRenderer) return;
+      this.glassRenderer = GlassRenderer.create(
+        () => this.kick(),
+        () => {
+          this.glassRenderer?.destroy();
+          this.glassRenderer = null;
+          this.loadGlassRenderer();
+        },
+      );
+      this.kick();
+    }).catch(() => {});
   }
 
   setBackdrop(img: HTMLImageElement, x: number, y: number, w: number, h: number) {
@@ -192,26 +217,29 @@ export class Liquid {
     this.kick();
   }
 
-  /** Frosted glass inside the current path (called with the shape as clip). */
-  private paintGlass(ctx: CanvasRenderingContext2D, L: number, R: number, H: number) {
+  /** Paints inside the same path that clips the other island effects. */
+  private paintGlass(ctx: CanvasRenderingContext2D, L: number, R: number, H: number, radius: number, flare: number) {
     const b = this.backdrop;
-    if (b) {
-      ctx.save();
-      ctx.filter = "blur(14px) saturate(170%)";
-      // bleed past the edges so the blur doesn't fade to transparent at the border
-      ctx.drawImage(b.img, b.x - 24, b.y - 24, b.w + 48, b.h + 48);
-      ctx.restore();
+    const extraHeight = Math.max(0, this.pull.value)
+      + Math.max(0, this.wave.value) * (1.6 + this.level * 7.5)
+      + Math.max(0, this.spikes.value) * 6;
+    if (
+      b && this.glassRenderer?.draw(ctx, b, {
+        left: L,
+        right: R,
+        height: H,
+        radius,
+        flare,
+        extraHeight,
+        bottomOffset: (x) => this.disp(x, L, R - L, radius),
+      }, this.cw, this.ch, this.dpr)
+    ) {
+      return;
     }
-    // tint keeps text readable on any wallpaper
+    // A flat tinted view remains available if WebGL is disabled or has lost its context.
+    if (b) ctx.drawImage(b.img, b.x, b.y, b.w, b.h);
     ctx.fillStyle = "rgba(14,14,18,0.46)";
-    ctx.fillRect(L - 2, 0, R - L + 4, H + 2);
-    // soft sheen from above
-    const g = ctx.createLinearGradient(0, 0, 0, Math.max(30, H));
-    g.addColorStop(0, "rgba(255,255,255,0.16)");
-    g.addColorStop(0.45, "rgba(255,255,255,0.04)");
-    g.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(L - 2, 0, R - L + 4, H + 2);
+    ctx.fillRect(L - flare, 0, R - L + flare * 2, H + extraHeight + 1);
   }
 
   setSpectrum(bands: number[]) {
@@ -436,11 +464,11 @@ export class Liquid {
       ctx.save();
       this.shapePath(ctx, L, R, H, rr, f);
       ctx.clip();
-      this.paintGlass(ctx, L, R, H);
+      this.paintGlass(ctx, L, R, H, rr, f);
       // thin light edge (inside the clip, so only the inner half shows)
       this.shapePath(ctx, L, R, H, rr, f);
       ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
       ctx.stroke();
       ctx.restore();
     }
