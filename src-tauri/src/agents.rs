@@ -15,6 +15,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
@@ -28,6 +29,8 @@ use crate::native::proc;
 
 #[path = "opencode.rs"]
 mod opencode;
+#[path = "agents_runtime.rs"]
+mod runtime;
 use crate::store::now_ms;
 
 /// How long a question / permission waits in the island before the terminal asks.
@@ -109,6 +112,7 @@ pub struct Session {
 #[derive(Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Payload {
+    pub revision: u64,
     pub sessions: Vec<Session>,
     /// finished tasks today (the board in the office)
     pub done: u32,
@@ -139,6 +143,7 @@ enum Reply {
 
 struct Hub {
     app: AppHandle,
+    revision: AtomicU64,
     sessions: Mutex<HashMap<String, Session>>,
     waiting: Mutex<HashMap<String, Sender<Reply>>>,
     stats: Mutex<Stats>,
@@ -166,6 +171,7 @@ pub fn start(app: AppHandle, dir: PathBuf) {
     if HUB
         .set(Hub {
             app,
+            revision: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()),
             waiting: Mutex::new(HashMap::new()),
             stats: Mutex::new(Stats::default()),
@@ -201,8 +207,15 @@ pub fn start(app: AppHandle, dir: PathBuf) {
 
 pub fn snapshot() -> Payload {
     let Some(h) = hub() else { return Payload::default() };
-    let mut list: Vec<Session> = lock(&h.sessions).values().cloned().collect();
-    list.sort_by(|a, b| rank(&a.status).cmp(&rank(&b.status)).then(a.started_ms.cmp(&b.started_ms)));
+    let (revision, mut list) = {
+        let sessions = lock(&h.sessions);
+        (h.revision.fetch_add(1, Ordering::Relaxed) + 1, sessions.values().cloned().collect::<Vec<_>>())
+    };
+    list.sort_by(|a, b| {
+        rank(&a.status).cmp(&rank(&b.status))
+            .then(a.started_ms.cmp(&b.started_ms))
+            .then(a.id.cmp(&b.id))
+    });
     let mut st = lock(&h.stats);
     roll_day(&mut st);
     let now_min = now_ms() / 60_000;
@@ -210,13 +223,20 @@ pub fn snapshot() -> Payload {
         .rev()
         .map(|k| st.minutes.iter().find(|(m, _)| *m == now_min - k).map(|(_, n)| *n).unwrap_or(0))
         .collect();
-    Payload { sessions: list, done: st.done, activity }
+    Payload { revision, sessions: list, done: st.done, activity }
 }
 
 /// The island's answer: "allow" | "deny" | "answer" | "chat".
 pub fn answer(session: &str, request: &str, decision: &str, text: Option<String>) -> Result<(), String> {
     let h = hub().ok_or("not started")?;
-    let tx = lock(&h.waiting).remove(request).ok_or("Вопрос уже закрыт")?;
+    let tx = {
+        let sessions = lock(&h.sessions);
+        let active = sessions.get(session).and_then(|s| s.request.as_ref());
+        if active.map(|r| r.id.as_str()) != Some(request) {
+            return Err("Вопрос уже закрыт".into());
+        }
+        lock(&h.waiting).remove(request).ok_or("Вопрос уже закрыт")?
+    };
     let reply = match decision {
         "allow" => Reply::Allow,
         "deny" => Reply::Deny(text.unwrap_or_default()),
@@ -234,29 +254,27 @@ pub fn answer(session: &str, request: &str, decision: &str, text: Option<String>
 /// Brings the session's terminal / editor window to the front.
 pub fn focus(session: &str) -> bool {
     let Some(h) = hub() else { return false };
-    let (pids, cwd, client, source) = match lock(&h.sessions).get(session) {
-        Some(s) => (s.pids.clone(), s.cwd.clone(), s.client.clone(), s.source.clone()),
+    let (pids, client, source) = match lock(&h.sessions).get(session) {
+        Some(s) => (s.pids.clone(), s.client.clone(), s.source.clone()),
         None => return false,
     };
-    let mut target = proc::window_for_pids(&pids);
+    let hosts = proc::pids_by_exe(runtime::host_exes(&client, &source));
+    let related: Vec<u32> = pids.into_iter().filter(|pid| hosts.contains(pid)).collect();
+    let mut target = proc::window_for_pids(&related);
     if target == 0 {
-        // known only from its transcript: the app it runs in
-        let exes: &[&str] = match (client.as_str(), source.as_str()) {
-            ("desktop", "codex") => &["codex.exe"],
-            ("desktop", _) => &["claude.exe"],
-            ("vscode", _) => &["code.exe", "code - insiders.exe"],
-            ("cursor", _) => &["cursor.exe"],
-            ("windsurf", _) => &["windsurf.exe"],
-            _ => &["windowsterminal.exe"],
-        };
-        target = proc::window_for_pids(&proc::pids_by_exe(exes));
+        target = proc::unique_window_for_pids(&hosts);
     }
-    if target != 0 {
-        crate::native::input::activate(target);
-        return true;
+    if target == 0 && client == "desktop" && source == "codex" && proc::window_for_pids(&hosts) == 0 {
+        // Codex inside ChatGPT has a backend process but no standalone window.
+        // Use only the ChatGPT process that actually launched Codex.
+        let parents = proc::parent_pids(&hosts);
+        let chatgpt: Vec<u32> = proc::pids_by_exe(&["chatgpt.exe"])
+            .into_iter()
+            .filter(|pid| parents.contains(pid))
+            .collect();
+        target = proc::unique_window_for_pids(&chatgpt);
     }
-    // nothing found: at least open the project folder
-    !cwd.is_empty() && crate::native::shell::open(&cwd)
+    target != 0 && crate::native::input::activate(target)
 }
 
 /// "в приложении" / "в VS Code" / "в терминале"
@@ -815,9 +833,10 @@ fn title_from(head: &str) -> String {
 struct CodexFile {
     offset: u64,
     key: String,
-    pending_call: bool,
+    calls: runtime::CodexCalls,
+    primed: bool,
     finished: bool,
-    last: String,
+    internal: bool,
 }
 
 /// Runs `f` on the session `key`, creating it when missing (`fresh` = just created).
@@ -1199,7 +1218,10 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
     let Ok(mut file) = fs::File::open(p) else { return false };
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
     if len < f.offset {
-        f.offset = 0;
+        *f = CodexFile::default();
+    }
+    if f.internal {
+        return false;
     }
     let mut buf = Vec::new();
     if len > f.offset && file.seek(SeekFrom::Start(f.offset)).is_ok() {
@@ -1209,28 +1231,26 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
     let upto = buf.iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
     f.offset += upto as u64;
     let text = String::from_utf8_lossy(&buf[..upto]).into_owned();
+    let counting = f.primed;
+    f.primed |= upto != 0;
 
     let mut all = lock(&h.sessions);
     let mut touched = false;
     for line in text.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         let kind = str_of(&v, "type");
-        let pl = v.get("payload").cloned().unwrap_or(Value::Null);
+        let pl = v.get("payload").unwrap_or(&Value::Null);
         if kind == "session_meta" {
-            let id = str_of(&pl, "id");
+            let id = str_of(pl, "id");
             if id.is_empty() {
                 continue;
             }
-            f.key = format!("codex:{id}");
-            let cwd = str_of(&pl, "cwd").to_string();
-            let origin = str_of(&pl, "originator").to_lowercase();
-            let client = if origin.contains("vscode") {
-                "vscode"
-            } else if origin.contains("desktop") || origin.contains("app") {
-                "desktop"
-            } else {
-                "terminal"
+            let Some(client) = runtime::codex_client(pl) else {
+                f.internal = true;
+                return touched;
             };
+            f.key = format!("codex:{id}");
+            let cwd = str_of(pl, "cwd").to_string();
             let key = f.key.clone();
             all.entry(key.clone()).or_insert_with(|| Session {
                 id: key,
@@ -1241,17 +1261,18 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
                 status: "idle".into(),
                 action: "Готов к работе".into(),
                 started_ms: created_ms(&p.to_string_lossy()).unwrap_or(now),
+                updated_ms: mtime,
                 ..Default::default()
             });
             touched = true;
             continue;
         }
         let Some(s) = all.get_mut(&f.key) else { continue };
-        let sub = str_of(&pl, "type");
+        let sub = str_of(pl, "type");
         let mut relevant = true;
         match (kind, sub) {
             ("event_msg", "user_message") => {
-                let m = str_of(&pl, "message");
+                let m = str_of(pl, "message");
                 if s.title.is_empty() && !m.trim_start().starts_with('<') {
                     s.title = short(m, 60);
                 }
@@ -1263,15 +1284,16 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
                 s.status = "thinking".into();
                 s.action = "Думает…".into();
                 f.finished = false;
+                f.calls.clear();
             }
             ("event_msg", "task_complete") | ("event_msg", "turn_aborted") => {
-                if !f.finished && mtime > now - 5 * 60 * 1000 {
+                if counting && !f.finished && sub == "task_complete" {
                     bump_done();
                 }
                 f.finished = true;
-                f.pending_call = false;
+                f.calls.clear();
                 s.status = "done".into();
-                s.action = "Готово — ждёт задачу".into();
+                s.action = if sub == "turn_aborted" { "Остановлено" } else { "Готово — ждёт задачу" }.into();
             }
             ("event_msg", "token_count") => {
                 let info = pl.get("info");
@@ -1286,17 +1308,29 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
                 }
             }
             ("response_item", "function_call") | ("response_item", "local_shell_call") | ("response_item", "custom_tool_call") => {
-                f.pending_call = true;
+                let call_id = str_of(pl, "call_id");
+                let call_id = if call_id.is_empty() && sub == "local_shell_call" { str_of(pl, "id") } else { call_id };
+                f.calls.start(call_id);
                 s.status = "working".into();
-                s.action = codex_action(&pl);
-                f.last = s.action.clone();
+                s.action = codex_action(pl);
             }
             ("response_item", "function_call_output") | ("response_item", "custom_tool_call_output") | ("response_item", "local_shell_call_output") => {
-                f.pending_call = false;
+                let call_id = str_of(pl, "call_id");
+                let call_id = if call_id.is_empty() && sub == "local_shell_call_output" { str_of(pl, "id") } else { call_id };
+                if f.finished || !f.calls.finish(call_id) {
+                    continue;
+                }
                 s.actions += 1;
-                bump_activity();
-                s.status = "thinking".into();
-                s.action = "Думает…".into();
+                if counting {
+                    bump_activity();
+                }
+                if f.calls.running() {
+                    s.status = "working".into();
+                    s.action = "Выполняет команды".into();
+                } else {
+                    s.status = "thinking".into();
+                    s.action = "Думает…".into();
+                }
             }
             _ => relevant = sub == "reasoning" || sub == "agent_reasoning",
         }
@@ -1305,17 +1339,12 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
             s.updated_ms = mtime.max(s.updated_ms);
         }
     }
-    // nothing written for a while and no answer to the last step: probably
-    // asking for approval in the terminal
+    // The rollout has no approval signal. A quiet tool call can still be running.
     if let Some(s) = all.get_mut(&f.key) {
         let quiet = now - mtime;
-        if !f.finished && f.pending_call && quiet > 15_000 && s.status == "working" {
-            s.status = "waiting".into();
-            s.action = format!("Ждёт подтверждения {}? {}", place(&s.client), f.last);
-            touched = true;
-        } else if !f.finished && !f.pending_call && quiet > 120_000 && s.status == "thinking" {
+        if !f.finished && quiet > 120_000 && matches!(s.status.as_str(), "working" | "thinking") {
             s.status = "idle".into();
-            s.action = "Ждёт".into();
+            s.action = "Нет обновлений от Codex".into();
             touched = true;
         }
     }

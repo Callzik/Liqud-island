@@ -58,6 +58,14 @@ pub fn pids_by_exe(names: &[&str]) -> Vec<u32> {
         .collect()
 }
 
+/// The live direct parents of the given processes.
+pub fn parent_pids(pids: &[u32]) -> Vec<u32> {
+    processes()
+        .into_iter()
+        .filter_map(|(pid, parent, _)| pids.contains(&pid).then_some(parent))
+        .collect()
+}
+
 /// Process that owns a window (for a console window: the shell running in it).
 pub fn window_pid(h: isize) -> u32 {
     let mut pid = 0u32;
@@ -69,6 +77,8 @@ pub fn window_pid(h: isize) -> u32 {
 
 struct Find {
     pids: Vec<u32>,
+    unique: bool,
+    ambiguous: bool,
     /// (position in `pids`, window)
     best: Option<(usize, isize)>,
 }
@@ -84,6 +94,10 @@ unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
     let mut pid = 0u32;
     GetWindowThreadProcessId(h, Some(&mut pid));
     if let Some(i) = f.pids.iter().position(|p| *p == pid) {
+        if f.unique && f.best.is_some() {
+            f.ambiguous = true;
+            return BOOL(0);
+        }
         if f.best.map(|(b, _)| i < b).unwrap_or(true) {
             f.best = Some((i, h.0 as isize));
         }
@@ -93,12 +107,21 @@ unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
 
 /// Top-level window of the nearest process in `pids` that has one.
 pub fn window_for_pids(pids: &[u32]) -> isize {
+    find_window(pids, false)
+}
+
+/// A fallback by executable is safe only when there is one candidate window.
+pub fn unique_window_for_pids(pids: &[u32]) -> isize {
+    find_window(pids, true)
+}
+
+fn find_window(pids: &[u32], unique: bool) -> isize {
     if pids.is_empty() {
         return 0;
     }
-    let mut f = Find { pids: pids.to_vec(), best: None };
+    let mut f = Find { pids: pids.to_vec(), unique, ambiguous: false, best: None };
     unsafe {
         let _ = EnumWindows(Some(each), LPARAM(&mut f as *mut Find as isize));
     }
-    f.best.map(|(_, h)| h).unwrap_or(0)
+    if f.ambiguous { 0 } else { f.best.map(|(_, h)| h).unwrap_or(0) }
 }

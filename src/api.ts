@@ -189,6 +189,7 @@ export interface AgentSession {
 }
 
 export interface AgentsPayload {
+  revision?: number;
   sessions: AgentSession[];
   done: number;
   activity: number[];

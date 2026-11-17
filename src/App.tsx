@@ -570,7 +570,25 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<RecordingState>("recording", setRec));
     subs.push(on<DownloadProgress | null>("download", setDownload));
     subs.push(on<ShelfItem[]>("shelf", setShelf));
-    subs.push(on<AgentsPayload>("agents", setAgents));
+    let agentsRevision = -1;
+    let seenAgentsEvent = false;
+    const applyAgents = (next: AgentsPayload) => {
+      if (disposed || (next.revision !== undefined && next.revision <= agentsRevision)) return;
+      if (next.revision !== undefined) agentsRevision = next.revision;
+      setAgents(next);
+    };
+    const agentsSub = on<AgentsPayload>("agents", (next) => {
+      seenAgentsEvent = true;
+      applyAgents(next);
+    });
+    subs.push(agentsSub);
+    agentsSub
+      .catch(() => {})
+      .then(() => call<AgentsPayload>("agents_list"))
+      .then((next) => {
+        if (!seenAgentsEvent || next.revision !== undefined) applyAgents(next);
+      })
+      .catch(() => {});
     subs.push(
       on<null>("office", () => {
         const n = live.current;
@@ -583,7 +601,6 @@ export default function App({ boot }: { boot: InitPayload }) {
         openPanel("office", false);
       }),
     );
-    call<AgentsPayload>("agents_list").then(setAgents).catch(() => {});
     subs.push(
       on<boolean>("launcher", (open) => {
         if (open) openLauncher();
@@ -628,7 +645,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     return () => {
       disposed = true;
       window.clearTimeout(t);
-      subs.forEach((p) => p.then((un) => un()));
+      subs.forEach((p) => p.then((un) => un()).catch(() => {}));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

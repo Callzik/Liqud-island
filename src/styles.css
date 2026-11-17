@@ -3205,9 +3205,15 @@ html.is-overlay body {
   white-space: nowrap;
 }
 
+.ag-project,
 .ag-act {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ag-project {
+  max-width: 35%;
 }
 
 .ag-src {
@@ -3218,15 +3224,9 @@ html.is-overlay body {
   flex-shrink: 0;
 }
 
-.ag-place {
-  font-style: normal;
-  font-weight: 400;
+.ag-location {
+  flex-shrink: 0;
   color: var(--faint);
-  margin-left: 3px;
-}
-
-.ag-place::before {
-  content: "· ";
 }
 
 .ag-ctx {
@@ -3367,12 +3367,6 @@ html.is-overlay body {
   align-items: center;
   gap: 14px;
   font-size: 12.5px;
-}
-
-.ag-dmeta .ag-src {
-  background: rgba(224, 123, 83, 0.12);
-  padding: 2px 7px;
-  border-radius: 7px;
 }
 
 .ag-acts {

@@ -9,7 +9,6 @@ export const SOURCES = {
 } as const;
 
 const PLACES: Record<string, { name: string; where: string; open: string }> = {
-  desktop: { name: "приложение", where: "в приложении", open: "Открыть приложение" },
   vscode: { name: "VS Code", where: "в VS Code", open: "Открыть VS Code" },
   cursor: { name: "Cursor", where: "в Cursor", open: "Открыть Cursor" },
   windsurf: { name: "Windsurf", where: "в Windsurf", open: "Открыть Windsurf" },
@@ -18,7 +17,13 @@ const PLACES: Record<string, { name: string; where: string; open: string }> = {
 };
 
 /** Where the session runs: the Claude / Codex app, an editor or a terminal. */
-export const place = (s: AgentSession) => PLACES[s.client] ?? PLACES.terminal;
+export function place(s: AgentSession) {
+  if (s.client === "desktop") {
+    const app = SOURCES[s.source].short;
+    return { name: "приложение", where: `в приложении ${app}`, open: `Открыть ${app}` };
+  }
+  return PLACES[s.client] ?? PLACES.terminal;
+}
 
 export const needsYou = (s: AgentSession) => s.status === "permission" || s.status === "question" || s.status === "waiting";
 export const isBusy = (s: AgentSession) => s.status === "working" || s.status === "thinking";

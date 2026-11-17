@@ -13,7 +13,6 @@ export function SourceTag({ s }: { s: AgentSession }) {
     <span className="ag-src" style={{ color: src.color }}>
       <AgentMark source={s.source} size={13} color={src.color} />
       {src.name}
-      {s.client && <em className="ag-place">{place(s).name}</em>}
     </span>
   );
 }
@@ -115,7 +114,7 @@ export function AgentsTab({
       </div>
 
       {cur ? (
-        <Detail s={cur} now={now} setBusy={setBusy} />
+        <Detail key={cur.id} s={cur} now={now} setBusy={setBusy} />
       ) : selected ? (
         <div className="ag-empty">
           <ICheck size={22} />
@@ -154,12 +153,13 @@ export function AgentsTab({
                 <Dot s={s} />
                 <span className="ag-main">
                   <span className="ag-name">
-                    <b>{agentName(s)}</b>
+                    <SourceTag s={s} />
+                    {(s.title || s.project) && <b>{agentName(s)}</b>}
                     {badge(s) && <i className="ag-badge">{badge(s)}</i>}
                   </span>
                   <span className="ag-line">
-                    {s.project && <span>{s.project}</span>}
-                    <SourceTag s={s} />
+                    {s.client && <span className="ag-location">{place(s).name}</span>}
+                    {s.title && s.project && <span className="ag-project">· {s.project}</span>}
                     <span className="ag-act">· {s.action}</span>
                   </span>
                 </span>
@@ -204,6 +204,7 @@ function Countdown({ startedMs, timeoutMs, now }: { startedMs: number; timeoutMs
 
 function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b: boolean) => void }) {
   const [sent, setSent] = useState<string | null>(null);
+  const [focusError, setFocusError] = useState(false);
   const req = s.request;
   const lastReq = useRef<string | null>(req?.id ?? null);
 
@@ -225,13 +226,14 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
     <div className="ag-detail">
       <div className="ag-dtop">
         <Dot s={s} />
-        <b className="ag-dname">{agentName(s)}</b>
+        <SourceTag s={s} />
+        <b className="ag-dname">{s.title || s.project}</b>
         {badge(s) && <i className="ag-badge big">{badge(s)}</i>}
         <span className="ag-time">{elapsed(s.startedMs, now)}</span>
       </div>
       <div className="ag-dmeta">
-        <SourceTag s={s} />
-        {s.project && <span className="ag-proj">{s.project}</span>}
+        {s.client && <span className="ag-location">{place(s).name}</span>}
+        {s.title && s.project && <span className="ag-proj">{s.project}</span>}
         <ContextBar s={s} wide />
         <span className="ag-acts">{s.actions} действий</span>
       </div>
@@ -289,8 +291,13 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
             </span>
           </div>
           <div className="ag-actions">
-            <span className="hint">{s.cwd}</span>
-            <button className="ag-btn primary" onClick={() => call("agents_focus", { session: s.id }).catch(() => {})}>
+            <span className="hint" role="status">{focusError ? "Не удалось открыть окно сессии" : s.cwd}</span>
+            <button className="ag-btn primary" onClick={() => {
+              setFocusError(false);
+              call<boolean>("agents_focus", { session: s.id })
+                .then((opened) => setFocusError(!opened))
+                .catch(() => setFocusError(true));
+            }}>
               {place(s).open}
             </button>
           </div>

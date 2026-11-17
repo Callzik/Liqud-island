@@ -62,15 +62,15 @@ pub fn class_name(h: isize) -> String {
 }
 
 /// Brings a previously active window back to the front.
-pub fn activate(h: isize) {
+pub fn activate(h: isize) -> bool {
     if !is_window(h) {
-        return;
+        return false;
     }
     unsafe {
         if IsIconic(hwnd(h)).as_bool() {
             let _ = ShowWindow(hwnd(h), SW_RESTORE);
         }
-        let _ = SetForegroundWindow(hwnd(h));
+        SetForegroundWindow(hwnd(h)).as_bool()
     }
 }
 
