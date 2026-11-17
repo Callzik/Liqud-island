@@ -84,7 +84,7 @@ pub struct Settings {
     pub music_reactive: bool,
     /// The island body takes the album art's colour while music plays.
     pub cover_tint: bool,
-    /// Hide the island while a fullscreen app (game, video) is in front.
+    /// Collapse the island into a clickable strip while a fullscreen app is in front.
     pub hide_fullscreen: bool,
     /// Expand the island when the cursor rests on it.
     pub hover_expand: bool,

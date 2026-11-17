@@ -73,6 +73,52 @@ impl Rect {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct HitRegion {
+    rect: Rect,
+    fullscreen: bool,
+    strip: bool,
+}
+
+impl HitRegion {
+    /// Whether the cursor is inside, should receive input, and is near enough for fast tracking.
+    fn cursor(self, fullscreen: bool, x: f64, y: f64, lmb: bool) -> (bool, bool, bool) {
+        // During a transition the frontend may still advertise its old, larger box.
+        if self.fullscreen != fullscreen || self.rect.w <= 0.0 || self.rect.h <= 0.0 {
+            return (false, false, false);
+        }
+        let inside = self.rect.contains(x, y);
+        // Outside the strip, dragging must reach the fullscreen app underneath.
+        let magnet = !self.strip && lmb && self.rect.grow(90.0, 150.0).contains(x, y);
+        let (side, down) = if self.strip { (48.0, 80.0) } else { (260.0, 320.0) };
+        let near = self.rect.grow(side, down).contains(x, y);
+        (inside, inside || magnet, near)
+    }
+}
+
+#[cfg(test)]
+mod hit_tests {
+    use super::*;
+
+    #[test]
+    fn fullscreen_strip_accepts_clicks_only_in_its_bounds() {
+        let rect = Rect { x: 468.0, y: 0.0, w: 64.0, h: 14.0 };
+        let strip = HitRegion { rect, fullscreen: true, strip: true };
+        let panel = HitRegion { rect, fullscreen: true, strip: false };
+        assert_eq!(strip.cursor(true, 500.0, 7.0, false), (true, true, true));
+        assert_eq!(strip.cursor(true, 500.0, 22.0, true), (false, false, true));
+        assert_eq!(panel.cursor(true, 500.0, 22.0, true), (false, true, true));
+    }
+
+    #[test]
+    fn out_of_date_and_empty_bounds_never_capture_the_mouse() {
+        let rect = Rect { x: 100.0, y: 0.0, w: 800.0, h: 440.0 };
+        let normal = HitRegion { rect, fullscreen: false, strip: false };
+        assert_eq!(normal.cursor(true, 500.0, 20.0, true), (false, false, false));
+        assert_eq!(HitRegion::default().cursor(false, 0.0, 7.0, true), (false, false, false));
+    }
+}
+
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 struct Geom {
     x: i32,
@@ -178,11 +224,11 @@ struct Shared {
     settings: Mutex<Settings>,
     data: Mutex<Data>,
     clips: Mutex<ClipStore>,
-    hit: Mutex<Rect>,
+    hit: Mutex<HitRegion>,
     geom: Mutex<Geom>,
     own_hwnd: AtomicIsize,
     last_fg: AtomicIsize,
-    suppressed: AtomicBool,
+    fullscreen: AtomicBool,
     launcher_open: AtomicBool,
     media_playing: AtomicBool,
     clip_skip_seq: AtomicU32,
@@ -520,21 +566,31 @@ fn spawn_cursor_thread(app: AppHandle, shared: Arc<Shared>) {
                 if geom.scale <= 0.0 {
                     continue;
                 }
+                if last_fg_check.elapsed() >= Duration::from_millis(240) {
+                    last_fg_check = Instant::now();
+                    let own = shared.own_hwnd.load(Ordering::Relaxed);
+                    let fg = input::foreground();
+                    let external = if fg == 0 || fg == own || input::is_own_process(fg) {
+                        // Clicking the island must not end its fullscreen mode.
+                        shared.last_fg.load(Ordering::Relaxed)
+                    } else {
+                        shared.last_fg.store(fg, Ordering::Relaxed);
+                        fg
+                    };
+                    let fullscreen = lock(&shared.settings).hide_fullscreen && input::window_is_fullscreen(external, own);
+                    if fullscreen != shared.fullscreen.swap(fullscreen, Ordering::Relaxed) {
+                        let _ = app.emit("fullscreen", fullscreen);
+                    }
+                }
                 let (cx, cy) = input::cursor_pos();
                 let lx = (cx - geom.x) as f64 / geom.scale;
                 let ly = (cy - geom.y) as f64 / geom.scale;
-                let rect = *lock(&shared.hit);
-                let suppressed = shared.suppressed.load(Ordering::Relaxed);
+                let hit = *lock(&shared.hit);
                 let lmb = input::lmb_down();
-                let inside = !suppressed && rect.contains(lx, ly);
-                // While a button is held (file drag) the catch zone is larger,
-                // so the island can grow into drop targets before the cursor arrives.
-                let magnet = !suppressed && lmb && rect.grow(90.0, 150.0).contains(lx, ly);
-                let want = inside || magnet;
+                let (inside, want, near) = hit.cursor(shared.fullscreen.load(Ordering::Relaxed), lx, ly, lmb);
                 if want != input_on && win.set_ignore_cursor_events(!want).is_ok() {
                     input_on = want;
                 }
-                let near = !suppressed && rect.grow(260.0, 320.0).contains(lx, ly);
                 if near || was_near {
                     let key = (lx.round() as i32, ly.round() as i32, inside, lmb);
                     if last != Some(key) {
@@ -545,21 +601,6 @@ fn spawn_cursor_thread(app: AppHandle, shared: Arc<Shared>) {
                 was_near = near;
                 pause = if near || input_on { 16 } else { 64 };
 
-                if last_fg_check.elapsed() >= Duration::from_millis(240) {
-                    last_fg_check = Instant::now();
-                    let own = shared.own_hwnd.load(Ordering::Relaxed);
-                    let fg = input::foreground();
-                    // remember the user's window, never one of ours (the capture
-                    // overlay or the tray menu would get the focus back instead)
-                    if fg != 0 && fg != own && !input::is_own_process(fg) {
-                        shared.last_fg.store(fg, Ordering::Relaxed);
-                    }
-                    let hide = lock(&shared.settings).hide_fullscreen && input::foreground_is_fullscreen(own);
-                    if hide != suppressed {
-                        shared.suppressed.store(hide, Ordering::Relaxed);
-                        let _ = app.emit("suppressed", hide);
-                    }
-                }
                 if last_place.elapsed() >= Duration::from_millis(2400) {
                     last_place = Instant::now();
                     place_window(&win, &shared, false);
@@ -736,7 +777,7 @@ fn spawn_audio_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<AudioCmd
                     publish_volume(&app, &shared, &audio);
                 }
                 let active = shared.media_playing.load(Ordering::Relaxed)
-                    && !shared.suppressed.load(Ordering::Relaxed)
+                    && !shared.fullscreen.load(Ordering::Relaxed)
                     && lock(&shared.settings).music_reactive;
                 spectrum.set_active(active);
                 if active {
@@ -1119,8 +1160,13 @@ fn init(app: AppHandle, state: St<'_>) -> InitPayload {
 }
 
 #[tauri::command]
-fn set_hit(state: St<'_>, rect: Rect) {
-    *lock(&state.hit) = rect;
+fn fullscreen_state(state: St<'_>) -> bool {
+    state.fullscreen.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+fn set_hit(state: St<'_>, rect: Rect, fullscreen: bool, strip: bool) {
+    *lock(&state.hit) = HitRegion { rect, fullscreen, strip };
 }
 
 #[tauri::command]
@@ -1784,7 +1830,9 @@ fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
                         thread::sleep(Duration::from_millis(60));
                     }
                 }
-                if !glass || shared.suppressed.load(Ordering::Relaxed) {
+                let hit = *lock(&shared.hit);
+                let fullscreen = shared.fullscreen.load(Ordering::Relaxed);
+                if !glass || hit.strip || hit.fullscreen != fullscreen {
                     last_hash = None;
                     last_hit = Rect::default();
                     transition_hit = Rect::default();
@@ -1793,7 +1841,7 @@ fn spawn_backdrop_thread(app: AppHandle, shared: Arc<Shared>) {
                     thread::sleep(Duration::from_millis(400));
                     continue;
                 }
-                let hit = *lock(&shared.hit);
+                let hit = hit.rect;
                 // The larger panel moves more pixels per capture.
                 let interval = Duration::from_millis(if hit.h > 90.0 { 50 } else { 33 });
                 let geom = *lock(&shared.geom);
@@ -3212,11 +3260,11 @@ fn main() {
                 settings: Mutex::new(settings.clone()),
                 data: Mutex::new(data),
                 clips: Mutex::new(clips),
-                hit: Mutex::new(Rect::default()),
+                hit: Mutex::new(HitRegion::default()),
                 geom: Mutex::new(Geom::default()),
                 own_hwnd: AtomicIsize::new(0),
                 last_fg: AtomicIsize::new(0),
-                suppressed: AtomicBool::new(false),
+                fullscreen: AtomicBool::new(false),
                 launcher_open: AtomicBool::new(false),
                 media_playing: AtomicBool::new(false),
                 clip_skip_seq: AtomicU32::new(0),
@@ -3291,7 +3339,7 @@ fn main() {
                 input::watch_double_ctrl(move || {
                     let st = app.state::<Arc<Shared>>();
                     let s = lock(&st.settings);
-                    if s.agents_enabled && s.office_hotkey && !st.suppressed.load(Ordering::Relaxed) {
+                    if s.agents_enabled && s.office_hotkey && !st.fullscreen.load(Ordering::Relaxed) {
                         let _ = app.emit("office", ());
                     }
                 });
@@ -3317,6 +3365,7 @@ fn main() {
             sys_settings,
             init,
             set_hit,
+            fullscreen_state,
             save_settings,
             launcher_closed,
             open_launcher,

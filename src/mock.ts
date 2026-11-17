@@ -236,6 +236,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       return r({ ...state, cover: { id: 1, url: cover }, version: "0.1.0-dev", hotkeyError: null });
     case "list_apps":
       return r(apps);
+    case "fullscreen_state":
+      return r(false);
     case "get_icons":
       return r(Object.fromEntries((args.keys as string[]).map((k) => [k, iconFor(k)])));
     case "save_settings":

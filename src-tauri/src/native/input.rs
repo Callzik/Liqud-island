@@ -11,7 +11,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
-    GetWindowThreadProcessId, IsIconic, IsWindow, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
     GWL_EXSTYLE, GWL_STYLE, SM_SWAPBUTTON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SW_RESTORE, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
@@ -156,12 +156,14 @@ fn monitor_rect_of(h: isize) -> Option<RECT> {
     }
 }
 
-/// True when the foreground window covers the whole monitor the island lives on
+/// True when the given window covers the whole monitor the island lives on
 /// (games, videos, presentations).
-pub fn foreground_is_fullscreen(own: isize) -> bool {
-    let fg = foreground();
+pub fn window_is_fullscreen(fg: isize, own: isize) -> bool {
     // our own capture overlay covers the monitor too — that is not a game
-    if fg == 0 || fg == own || is_own_process(fg) {
+    if !is_window(fg) || fg == own || is_own_process(fg) {
+        return false;
+    }
+    if unsafe { IsIconic(hwnd(fg)).as_bool() || !IsWindowVisible(hwnd(fg)).as_bool() } {
         return false;
     }
     let class = class_name(fg);

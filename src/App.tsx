@@ -38,10 +38,10 @@ import { Residents, type IslandBox } from "./components/Residents";
 import { RecPill, type RecordingState } from "./components/RecPill";
 import { AgentPill } from "./components/AgentPill";
 
-type Mode = "hidden" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download" | "rec" | "agent";
+type Mode = "fullscreen-strip" | "idle" | "music" | "peek" | "toast" | "drop" | "panel" | "launcher" | "voice" | "download" | "rec" | "agent";
 
 const BOX: Record<Exclude<Mode, "launcher">, { w: number; h: number; r: number }> = {
-  hidden: { w: 0, h: 0, r: 0 },
+  "fullscreen-strip": { w: 64, h: 14, r: 7 },
   idle: { w: 176, h: 30, r: 15 },
   music: { w: 320, h: 38, r: 19 },
   peek: { w: 430, h: 70, r: 28 },
@@ -91,7 +91,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   const islandBox = useRef<IslandBox>({ cx: 500, w: 0, h: 0 });
   const innerRef = useRef<HTMLDivElement>(null);
   // DOM snapshot of the previous state's content, faded out while the shape morphs
-  const ghostRef = useRef<{ mode: Mode; node: Node | null }>({ mode: "hidden", node: null });
+  const ghostRef = useRef<{ mode: Mode | null; node: Node | null }>({ mode: null, node: null });
   const liquidRef = useRef<Liquid | null>(null);
 
   const [settings, setSettings] = useState<Settings>(boot.settings);
@@ -124,7 +124,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   const [drop, setDrop] = useState<{ paths: string[]; zone: DropZone | null } | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [peek, setPeek] = useState(false);
-  const [suppressed, setSuppressed] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [agents, setAgents] = useState<AgentsPayload>({ sessions: [], done: 0, activity: [] });
   const [agentSel, setAgentSel] = useState<string | null>(null);
   // the first session that asks something (permission / question)
@@ -132,11 +132,11 @@ export default function App({ boot }: { boot: InitPayload }) {
   const alert = asking[0] ?? null;
 
   // latest values for long-lived event listeners
-  const live = useRef({ panelOpen, pinned, launcherOpen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab, alert: null as string | null });
-  live.current = { ...live.current, panelOpen, pinned, launcherOpen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle" || rec.active, tab, alert: alert?.id ?? null };
+  const live = useRef({ panelOpen, pinned, launcherOpen, fullscreen, drop, settings, media, armed: true, lmb: false, busy: false, toastActions: false, tab: "home" as Tab, alert: null as string | null });
+  live.current = { ...live.current, panelOpen, pinned, launcherOpen, fullscreen, drop, settings, media, toastActions: !!toast?.actions?.length || voice.state !== "idle" || rec.active, tab, alert: alert?.id ?? null };
 
-  const mode: Mode = suppressed
-    ? "hidden"
+  const mode: Mode = fullscreen
+    ? launcherOpen ? "launcher" : panelOpen ? (drop ? "drop" : "panel") : "fullscreen-strip"
     : voice.state !== "idle"
       ? "voice"
       : rec.active && !launcherOpen && !panelOpen && !drop
@@ -167,9 +167,10 @@ export default function App({ boot }: { boot: InitPayload }) {
   const chatState = useSyncExternalStore(chat.subscribe, chat.get);
   const aiThinking = chatState.messages.some((m) => m.pending);
   const glass = settings.theme === "glass";
+  const drawGlass = glass && mode !== "fullscreen-strip";
   useEffect(() => {
-    liquidRef.current?.setGlass(glass);
-  }, [glass]);
+    liquidRef.current?.setGlass(drawGlass);
+  }, [drawGlass]);
 
   // island colour and light/dark theme ("system" follows Windows through the WebView)
   const [sysLight, setSysLight] = useState(() => window.matchMedia?.("(prefers-color-scheme: light)").matches ?? false);
@@ -211,6 +212,7 @@ export default function App({ boot }: { boot: InitPayload }) {
     ghostRef.current.node = null;
     if (!node || !host || !node.childNodes.length) return;
     node.classList.add("island-ghost");
+    node.inert = true;
     node.removeAttribute("id");
     host.appendChild(node);
     const t = window.setTimeout(() => node.remove(), 260);
@@ -308,17 +310,28 @@ export default function App({ boot }: { boot: InitPayload }) {
       bars: music && (mode === "music" || mode === "peek"),
       rim: rimFor(),
       tint:
-        settings.coverTint && music && cover.url
+        mode !== "fullscreen-strip" && settings.coverTint && music && cover.url
           ? [accent[0], accent[1], accent[2], mode === "music" || mode === "peek" ? 0.32 : mode === "panel" || mode === "launcher" ? 0.14 : 0]
           : undefined,
       shadow: mode === "panel" || mode === "launcher" || mode === "drop",
       spikes: mode === "toast" && toast?.tone === "alarm",
     });
-    const pad = mode === "drop" ? 24 : mode === "panel" || mode === "launcher" ? 10 : 6;
-    const rect = box.w > 0 ? { x: liquid.centerX - box.w / 2 - pad, y: 0, w: box.w + pad * 2, h: box.h + pad } : { x: 0, y: 0, w: 0, h: 0 };
-    (window as any).__islandHit = rect;
-    call("set_hit", { rect }).catch(() => {});
   }, [mode, box.w, box.h, box.r, accent, media?.playing, cover.url, settings.cursorPull, settings.musicReactive, settings.coverTint, toast?.tone, alert?.source]);
+
+  useEffect(() => {
+    const liquid = liquidRef.current;
+    if (!liquid) return;
+    const strip = mode === "fullscreen-strip";
+    const pad = strip ? 0 : mode === "drop" ? 24 : mode === "panel" || mode === "launcher" ? 10 : 6;
+    const syncHit = () => {
+      const rect = { x: Math.round(liquid.centerX - box.w / 2) - pad, y: 0, w: box.w + pad * 2, h: box.h + pad };
+      (window as any).__islandHit = rect;
+      call("set_hit", { rect, fullscreen, strip }).catch(() => {});
+    };
+    syncHit();
+    window.addEventListener("resize", syncHit);
+    return () => window.removeEventListener("resize", syncHit);
+  }, [mode, fullscreen, box.w, box.h]);
 
   // ---- accent from cover ---------------------------------------------------
   useEffect(() => {
@@ -469,16 +482,17 @@ export default function App({ boot }: { boot: InitPayload }) {
       on<Cursor>("cursor", (c) => {
         const s = live.current;
         s.lmb = c.lmb;
+        if (s.fullscreen && !s.panelOpen && !s.launcherOpen) return;
         liquidRef.current?.setCursor(c.x, c.y, c.inside);
         if (c.inside) {
           s.armed = true;
           window.clearTimeout(leaveT);
           leaveT = 0;
-          if (!s.panelOpen && !s.launcherOpen && !s.drop && !s.toastActions && s.settings.hoverExpand && !c.lmb && !enterT) {
+          if (!s.fullscreen && !s.panelOpen && !s.launcherOpen && !s.drop && !s.toastActions && s.settings.hoverExpand && !c.lmb && !enterT) {
             enterT = window.setTimeout(() => {
               enterT = 0;
               const n = live.current;
-              if (n.panelOpen || n.launcherOpen || n.drop || n.toastActions) return;
+              if (n.fullscreen || n.panelOpen || n.launcherOpen || n.drop || n.toastActions) return;
               // an agent asks: straight to its question
               if (n.alert) setAgentSel(n.alert);
               openPanel(n.alert ? "agents" : undefined, true);
@@ -515,7 +529,36 @@ export default function App({ boot }: { boot: InitPayload }) {
     subs.push(on<number[]>("spectrum", (b) => liquidRef.current?.setSpectrum(b)));
     subs.push(on<Volume>("volume", setVolume));
     subs.push(on<Clip[]>("clips", setClips));
-    subs.push(on<boolean>("suppressed", setSuppressed));
+    let seenFullscreenEvent = false;
+    const syncFullscreen = (active: boolean) => {
+      const s = live.current;
+      if (disposed || s.fullscreen === active) return;
+      s.fullscreen = active;
+      setFullscreen(active);
+      if (active) {
+        window.clearTimeout(enterT);
+        enterT = 0;
+        window.clearTimeout(leaveT);
+        leaveT = 0;
+        liquidRef.current?.clearCursor();
+        setPinned(false);
+        setDrop(null);
+        if (s.launcherOpen) {
+          setPanelOpen(false);
+          closeLauncher(document.hasFocus());
+        } else if (s.panelOpen) {
+          closePanel();
+        }
+      }
+    };
+    const fullscreenSub = on<boolean>("fullscreen", (active) => {
+      seenFullscreenEvent = true;
+      syncFullscreen(active);
+    });
+    subs.push(fullscreenSub);
+    fullscreenSub.catch(() => {}).then(() => call<boolean>("fullscreen_state")).then((active) => {
+      if (!seenFullscreenEvent) syncFullscreen(active);
+    }).catch(() => {});
     subs.push(on<ToastData>("toast", (t) => showToast(t, t.ms ?? 3000)));
     subs.push(on<Tab>("open-tab", (t) => openRef.current(t, false)));
     subs.push(
@@ -623,6 +666,7 @@ export default function App({ boot }: { boot: InitPayload }) {
         const cx = liquidRef.current?.centerX ?? window.innerWidth / 2;
         // the chat tab takes files as attachments
         const n = live.current;
+        if (n.fullscreen && !n.panelOpen && !n.launcherOpen) return;
         if (n.panelOpen && n.tab === "chat" && chatDrop.current) {
           if (e.type === "drop") chatDrop.current(e.paths);
           return;
@@ -645,6 +689,8 @@ export default function App({ boot }: { boot: InitPayload }) {
     return () => {
       disposed = true;
       window.clearTimeout(t);
+      window.clearTimeout(enterT);
+      window.clearTimeout(leaveT);
       subs.forEach((p) => p.then((un) => un()).catch(() => {}));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -822,7 +868,7 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   return (
     <div
-      className={`root ${suppressed ? "is-hidden" : ""} ${glass ? "theme-glass" : ""} ${light ? "theme-light" : ""} ${islandColor && !light ? "theme-tinted" : ""}`}
+      className={`root ${glass ? "theme-glass" : ""} ${light ? "theme-light" : ""} ${islandColor && !light ? "theme-tinted" : ""}`}
       style={islandColor && !glass ? ({ ["--island" as string]: islandColor } as CSSProperties) : undefined}
     >
       <canvas ref={canvasRef} className="liquid" />
@@ -830,13 +876,15 @@ export default function App({ boot }: { boot: InitPayload }) {
         <Residents
           ids={settings.residents}
           boxRef={islandBox}
-          visible={!["panel", "launcher", "drop", "hidden"].includes(mode)}
+          visible={!["panel", "launcher", "drop", "fullscreen-strip"].includes(mode)}
           playing={!!media?.playing}
         />
       )}
       <div ref={clipRef} className={`island mode-${mode}`} onClick={onIslandClick}>
         <div ref={innerRef} className="island-inner" style={{ width: box.w, height: box.h }} key={mode}>
-          {content}
+          {mode === "fullscreen-strip" ? (
+            <button type="button" className="fullscreen-handle" aria-label="Открыть остров" onClick={() => openPanel("home", true)} />
+          ) : content}
         </div>
       </div>
     </div>

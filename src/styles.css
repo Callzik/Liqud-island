@@ -94,11 +94,6 @@ input::placeholder {
   transition: opacity 0.3s var(--ease);
 }
 
-.root.is-hidden .liquid,
-.root.is-hidden .island {
-  opacity: 0;
-}
-
 .island-inner {
   position: absolute;
   top: 0;
@@ -107,6 +102,37 @@ input::placeholder {
   /* "backwards": once the entrance ends nothing stays applied (no transform/filter
      layer), so text is rasterised directly on whole pixels and stays sharp */
   animation: content-in 0.36s var(--ease) 0.06s backwards;
+}
+
+.mode-fullscreen-strip .island-inner:not(.island-ghost) {
+  animation: none;
+}
+
+.fullscreen-handle {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.fullscreen-handle::after {
+  content: "";
+  width: 28px;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.fullscreen-handle:hover::after,
+.fullscreen-handle:focus-visible::after {
+  background: white;
+}
+
+.theme-light .fullscreen-handle::after {
+  background: rgba(0, 0, 0, 0.65);
+  box-shadow: none;
 }
 
 @keyframes content-in {
