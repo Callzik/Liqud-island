@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { call, type HookStatus, type MediaApp, type Settings } from "../api";
 import { IKeyboard, IPower } from "./Icons";
+import { PANEL_TABS } from "./panelTabs";
 import { RESIDENTS, ResidentSvg } from "../lib/residents";
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -455,6 +456,7 @@ export function SettingsTab({
 }) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => save({ [k]: v } as Partial<Settings>);
   const [confirm, setConfirm] = useState(false);
+  const hiddenTabs = settings.panelHide ?? [];
 
   const rows: { key: keyof Settings; title: string; sub: string }[] = [
     { key: "autostart", title: "Запускать вместе с Windows", sub: "Остров появится сразу после входа" },
@@ -488,6 +490,28 @@ export function SettingsTab({
             <button className={settings.theme !== "glass" ? "on" : ""} onClick={() => set("theme", "black")}>
               Чёрный
             </button>
+          </div>
+        </div>
+        <div className="setting setting-wide tab-visibility" role="group" aria-labelledby="panel-tabs-title">
+          <div>
+            <div className="setting-title" id="panel-tabs-title">Верхние вкладки</div>
+            <div className="setting-sub">Выберите, какие включённые разделы показывать сверху</div>
+          </div>
+          <div className="tab-visibility-chips">
+            {PANEL_TABS.filter(({ id }) => id !== "home").map(({ id, label }) => {
+              const visible = !hiddenTabs.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`chip ${visible ? "on" : ""}`}
+                  aria-pressed={visible}
+                  onClick={() => set("panelHide", visible ? [...hiddenTabs, id] : hiddenTabs.filter((tab) => tab !== id))}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
         <IslandLook settings={settings} save={save} />

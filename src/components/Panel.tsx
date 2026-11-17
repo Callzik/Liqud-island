@@ -1,6 +1,7 @@
 import type { AgentsPayload, Clip, Media, PinItem, Settings, ShelfItem, Volume } from "../api";
 import type { RGB } from "../lib/color";
-import { IBuilding, IChat, IClipboard, IHome, IInbox, ILyrics, INote, IPin, ISliders, ISun, ITerminal, ITextTool, IToggles } from "./Icons";
+import { IPin, ISliders } from "./Icons";
+import { PANEL_TABS, type Tab } from "./panelTabs";
 import { AgentsTab } from "./AgentsTab";
 import { Office } from "./Office";
 import { needsYou } from "../lib/agents";
@@ -18,22 +19,7 @@ import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
 
-export type Tab = "home" | "clipboard" | "shelf" | "text" | "chat" | "notes" | "agents" | "office" | "weather" | "controls" | "lyrics" | "settings";
-
-// order as in the promo video; «Песня» (lyrics) comes last
-const TABS: { id: Exclude<Tab, "settings">; label: string; Icon: typeof IHome; on?: (s: Settings) => boolean }[] = [
-  { id: "home", label: "Главная", Icon: IHome },
-  { id: "clipboard", label: "Буфер", Icon: IClipboard },
-  { id: "shelf", label: "Полка", Icon: IInbox },
-  { id: "text", label: "Текст", Icon: ITextTool, on: (s) => s.textEnabled },
-  { id: "chat", label: "Чат", Icon: IChat, on: (s) => s.aiEnabled },
-  { id: "notes", label: "Заметки", Icon: INote, on: (s) => s.notesEnabled },
-  { id: "agents", label: "Агенты", Icon: ITerminal, on: (s) => s.agentsEnabled },
-  { id: "office", label: "Офис", Icon: IBuilding, on: (s) => s.agentsEnabled },
-  { id: "weather", label: "Погода", Icon: ISun, on: (s) => s.weatherEnabled },
-  { id: "controls", label: "Управление", Icon: IToggles },
-  { id: "lyrics", label: "Песня", Icon: ILyrics },
-];
+export type { Tab } from "./panelTabs";
 
 export interface PanelProps {
   tab: Tab;
@@ -69,11 +55,13 @@ export interface PanelProps {
 
 export function Panel(p: PanelProps) {
   const waiting = p.agents.sessions.filter(needsYou).length;
+  const hidden = p.settings.panelHide ?? [];
+  const tabs = PANEL_TABS.filter(({ id, on }) => (id === "home" || !hidden.includes(id)) && (!on || on(p.settings)));
   return (
     <div className="panel">
       <header className="panel-head">
         <nav className="tabs">
-          {TABS.filter((t) => !t.on || t.on(p.settings)).map(({ id, label, Icon }) => (
+          {tabs.map(({ id, label, Icon }) => (
             <button key={id} className={`tab ${p.tab === id ? "active" : ""}`} onClick={() => p.setTab(id)} title={label}>
               <Icon size={18} />
               {p.tab === id && <span>{label}</span>}

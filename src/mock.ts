@@ -64,6 +64,7 @@ const state = {
     mediaHidden: ["Telegram.TelegramDesktop"],
     recAudio: "system",
     homeHide: [],
+    panelHide: [],
     islandColor: "",
     islandTheme: "dark",
     islandFace: true,

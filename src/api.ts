@@ -49,6 +49,7 @@ export interface Settings {
   mediaHidden: string[];
   recAudio: "none" | "system" | "mic";
   homeHide: string[];
+  panelHide: string[];
   islandColor: string;
   islandTheme: "dark" | "light" | "system";
   islandFace: boolean;

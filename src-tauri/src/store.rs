@@ -144,6 +144,8 @@ pub struct Settings {
     pub rec_audio: String,
     /// Parts of «Главная» the user switched off: "player", "recent", "volume", "dock", tile ids.
     pub home_hide: Vec<String>,
+    /// Tabs hidden from the panel navigation.
+    pub panel_hide: Vec<String>,
     /// Island body colour ("" = classic black).
     pub island_color: String,
     /// "dark", "light" or "system" (follow Windows).
@@ -196,6 +198,7 @@ impl Default for Settings {
             media_hidden: Vec::new(),
             rec_audio: "system".into(),
             home_hide: Vec::new(),
+            panel_hide: Vec::new(),
             island_color: String::new(),
             island_theme: "dark".into(),
             island_face: true,
