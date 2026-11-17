@@ -455,6 +455,18 @@ fn created_ms(path: &str) -> Option<i64> {
     Some(t.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as i64)
 }
 
+fn is_claude_hook(event: &Value, pids: &[u32]) -> bool {
+    let transcript = str_of(event, "transcript_path");
+    let parents: Vec<String> = pids.iter().filter_map(|pid| crate::native::util::process_exe_path(*pid)).collect();
+    // Read only the metadata line, with a fixed bound for a missing or partial header.
+    let first = fs::File::open(transcript).ok().and_then(|file| {
+        let mut line = String::new();
+        BufReader::new(file.take(64 * 1024)).read_line(&mut line).ok()?;
+        serde_json::from_str::<Value>(&line).ok()
+    });
+    runtime::claude_hook_source(transcript, &parents, first.as_ref().map(|v| str_of(v, "type")))
+}
+
 /// Updates the session; for a question / permission returns the channel the
 /// island's answer arrives on.
 fn on_hook(msg: &Value) -> Option<(String, String, std::sync::mpsc::Receiver<Reply>)> {
@@ -462,6 +474,11 @@ fn on_hook(msg: &Value) -> Option<(String, String, std::sync::mpsc::Receiver<Rep
     let ev = msg.get("event")?;
     let sid = str_of(ev, "session_id");
     if sid.is_empty() {
+        return None;
+    }
+    let pids: Vec<u32> = msg.get("pids").and_then(Value::as_array)
+        .into_iter().flatten().filter_map(Value::as_u64).filter_map(|pid| u32::try_from(pid).ok()).collect();
+    if !is_claude_hook(ev, &pids) {
         return None;
     }
     let name = str_of(ev, "hook_event_name").to_string();
@@ -1559,11 +1576,15 @@ pub fn hook_main() {
         return;
     }
     let Ok(event) = serde_json::from_str::<Value>(&input) else { return };
+    let pids = proc::ancestors();
+    if !is_claude_hook(&event, &pids) {
+        return;
+    }
     let Some(dir) = std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("dev.callzik.island")) else { return };
     let Some(port) = fs::read_to_string(dir.join(PORT_FILE)).ok().and_then(|p| p.trim().parse::<u16>().ok()) else { return };
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(400)) else { return };
-    let msg = json!({ "pids": proc::ancestors(), "event": event });
+    let msg = json!({ "pids": pids, "event": event });
     let mut w = &stream;
     if writeln!(w, "{msg}").is_err() {
         return;

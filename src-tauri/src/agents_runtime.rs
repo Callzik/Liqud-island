@@ -2,6 +2,33 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
+/// A Claude-compatible hook can also be installed in Codex. Validate its origin.
+pub(super) fn claude_hook_source(transcript: &str, parents: &[String], first_kind: Option<&str>) -> bool {
+    if first_kind == Some("session_meta") {
+        return false;
+    }
+    let path = transcript.replace('\\', "/").to_ascii_lowercase();
+    if path.contains("/.codex/") || path.rsplit('/').next().unwrap_or("").starts_with("rollout-") {
+        return false;
+    }
+    if path.contains("/.claude/") {
+        return true;
+    }
+    if matches!(first_kind, Some("user" | "assistant" | "queue-operation" | "file-history-snapshot" | "attachment")) {
+        return true;
+    }
+    // Nearest agent wins when one client launches a different agent.
+    for parent in parents {
+        let normalized = parent.replace('\\', "/").to_ascii_lowercase();
+        match normalized.rsplit('/').next().unwrap_or("") {
+            "claude.exe" => return true,
+            "codex.exe" | "chatgpt.exe" => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
 /// The app-server can record "vscode" for both Desktop and the CLI.
 pub(super) fn codex_client(meta: &Value) -> Option<&'static str> {
     if meta.pointer("/source/subagent/other").and_then(Value::as_str) == Some("guardian") {
@@ -80,6 +107,32 @@ impl CodexCalls {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn copied_claude_hook_rejects_codex_rollouts_and_processes() {
+        assert!(!claude_hook_source(r"C:\Users\me\.codex\sessions\rollout-1.jsonl", &[], None));
+        assert!(!claude_hook_source("/custom/sessions/rollout-2.jsonl", &[], Some("session_meta")));
+        assert!(!claude_hook_source("", &[r"C:\apps\codex.exe".into(), r"C:\apps\Claude.exe".into()], None));
+        assert!(!claude_hook_source("", &[r"C:\apps\ChatGPT.exe".into()], None));
+        assert!(!claude_hook_source(r"C:\custom\session.jsonl", &[], Some("session_meta")));
+    }
+
+    #[test]
+    fn genuine_claude_hooks_work_even_when_launched_by_codex() {
+        assert!(claude_hook_source(
+            r"C:\Users\me\.claude\projects\x\session.jsonl",
+            &[r"C:\apps\codex.exe".into()],
+            Some("user")
+        ));
+        assert!(claude_hook_source("", &[r"C:\apps\claude.exe".into(), r"C:\apps\codex.exe".into()], None));
+        assert!(claude_hook_source("/custom/claude/session.jsonl", &[], Some("assistant")));
+        assert!(claude_hook_source(
+            "/custom/claude/session.jsonl",
+            &[r"C:\apps\node.exe".into(), r"C:\apps\codex.exe".into()],
+            Some("user")
+        ));
+        assert!(claude_hook_source("", &[], None));
+    }
 
     #[test]
     fn desktop_and_cli_identity_beat_the_app_server_default() {
