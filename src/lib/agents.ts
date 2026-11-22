@@ -47,6 +47,7 @@ export function badge(s: AgentSession): string | null {
 /** Short "what is he doing" for the office labels. */
 export function doing(s: AgentSession): string {
   if (needsYou(s)) return "нужны вы";
+  if (s.status === "stale") return "нет свежих данных";
   if (s.status === "done" || s.status === "idle") return "отдыхает";
   const a = s.action;
   if (a.startsWith("Пишет") || a.startsWith("Правит")) return "пишет код";

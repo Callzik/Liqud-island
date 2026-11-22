@@ -1,9 +1,10 @@
 {
   "name": "island",
   "private": true,
-  "version": "0.6.6",
+  "version": "0.6.7",
   "type": "module",
   "scripts": {
+    "test": "node --test",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

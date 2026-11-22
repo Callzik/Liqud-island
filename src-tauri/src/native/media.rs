@@ -1,16 +1,17 @@
 //! Now-playing information through Global System Media Transport Controls
 //! (Spotify, Яндекс Музыка, browsers, Windows Media Player, ...).
 
-use windows::core::Result;
+use windows::core::{Interface, Result};
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session,
     GlobalSystemMediaTransportControlsSessionManager as Manager,
+    GlobalSystemMediaTransportControlsSessionMediaProperties as Properties,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
 };
 use windows::Graphics::Imaging::{
     BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode,
 };
-use windows::Storage::Streams::{DataReader, IRandomAccessStreamWithContentType};
+use windows::Storage::Streams::{DataReader, IInputStream, IRandomAccessStreamWithContentType, InputStreamOptions};
 
 /// 100ns ticks between 1601-01-01 and 1970-01-01.
 const EPOCH_DIFF: i64 = 116_444_736_000_000_000;
@@ -28,6 +29,7 @@ pub struct MediaState {
     pub updated_ms: i64,
     pub can_prev: bool,
     pub can_next: bool,
+    pub can_seek: bool,
 }
 
 pub struct Thumb {
@@ -44,6 +46,7 @@ pub struct Media {
     prefer: std::cell::RefCell<Option<String>>,
     /// the session shown last time: cover and buttons go to the same one
     active: std::cell::RefCell<Option<Session>>,
+    active_props: std::cell::RefCell<Option<Properties>>,
     /// last good state; bridges moments when a player (Liner, Electron apps)
     /// briefly returns no metadata while switching tracks
     last: std::cell::RefCell<Option<(MediaState, std::time::Instant)>>,
@@ -113,6 +116,7 @@ impl Media {
             manager,
             prefer: std::cell::RefCell::new(None),
             active: std::cell::RefCell::new(None),
+            active_props: std::cell::RefCell::new(None),
             last: std::cell::RefCell::new(None),
             hidden: std::cell::RefCell::new(Vec::new()),
             pick: std::cell::RefCell::new(None),
@@ -279,7 +283,18 @@ impl Media {
                 ),
                 Err(e) => (format!("<ошибка {e}>"), String::new()),
             };
-            out.push_str(&format!("{id} [{}] | {status} | {artist} — {title}\n", name(&id)));
+            let can_seek = s.GetPlaybackInfo().and_then(|p| p.Controls()).and_then(|c| c.IsPlaybackPositionEnabled());
+            let seek = can_seek.map(|v| if v { "да" } else { "нет" }).unwrap_or("неизвестно");
+            let timing = s.GetTimelineProperties().ok().map(|t| {
+                let position = t.Position().ok().map(|p| p.Duration / 10_000);
+                let updated = t.LastUpdatedTime().ok()
+                    .map(|d| (d.UniversalTime - EPOCH_DIFF) / 10_000)
+                    .filter(|d| *d > 0);
+                let sample = updated.map(|d| format!("{d} (возраст {} мс)", crate::store::now_ms() - d))
+                    .unwrap_or_else(|| "нет".into());
+                format!("позиция: {} мс | замер Unix мс: {sample}", position.map(|p| p.to_string()).unwrap_or_else(|| "нет".into()))
+            }).unwrap_or_else(|| "замер недоступен".into());
+            out.push_str(&format!("{id} [{}] | {status} | {artist} — {title}\n  перемотка: {seek} | {timing}\n", name(&id)));
         }
         out
     }
@@ -295,8 +310,9 @@ impl Media {
         let cands = self.candidates();
         let last = self.last.borrow().clone();
         for s in cands {
-            if let Some(st) = self.state_from(s.clone()) {
+            if let Some((st, props)) = self.state_with_properties(&s) {
                 *self.active.borrow_mut() = Some(s);
+                *self.active_props.borrow_mut() = Some(props);
                 *self.last.borrow_mut() = Some((st.clone(), std::time::Instant::now()));
                 return Some(st);
             }
@@ -312,10 +328,15 @@ impl Media {
             }
         }
         *self.active.borrow_mut() = None;
+        *self.active_props.borrow_mut() = None;
         None
     }
 
     fn state_from(&self, s: Session) -> Option<MediaState> {
+        self.state_with_properties(&s).map(|(state, _)| state)
+    }
+
+    fn state_with_properties(&self, s: &Session) -> Option<(MediaState, Properties)> {
         let props = s.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
         let mut title = props.Title().map(|h| h.to_string_lossy()).unwrap_or_default().trim().to_string();
         let mut artist = props.Artist().map(|h| h.to_string_lossy()).unwrap_or_default().trim().to_string();
@@ -341,38 +362,39 @@ impl Media {
         let album = props.AlbumTitle().map(|h| h.to_string_lossy()).unwrap_or_default();
         let app_id = s.SourceAppUserModelId().map(|h| h.to_string_lossy()).unwrap_or_default();
 
-        let (playing, can_prev, can_next) = match s.GetPlaybackInfo() {
+        let (playing, can_prev, can_next, can_seek) = match s.GetPlaybackInfo() {
             Ok(info) => {
                 let playing = info.PlaybackStatus().map(|st| st == Status::Playing).unwrap_or(false);
-                let (prev, next) = info
+                let (prev, next, seek) = info
                     .Controls()
                     .map(|c| {
                         (
                             c.IsPreviousEnabled().unwrap_or(true),
                             c.IsNextEnabled().unwrap_or(true),
+                            c.IsPlaybackPositionEnabled().unwrap_or(false),
                         )
                     })
-                    .unwrap_or((true, true));
-                (playing, prev, next)
+                    .unwrap_or((true, true, false));
+                (playing, prev, next, seek)
             }
-            Err(_) => (false, true, true),
+            Err(_) => (false, true, true, false),
         };
 
         let (position_ms, duration_ms, updated_ms) = match s.GetTimelineProperties() {
             Ok(t) => {
-                let pos = t.Position().map(|d| d.Duration / 10_000).unwrap_or(0);
+                let pos = t.Position().ok().map(|d| d.Duration / 10_000);
                 let start = t.StartTime().map(|d| d.Duration / 10_000).unwrap_or(0);
                 let end = t.EndTime().map(|d| d.Duration / 10_000).unwrap_or(0);
                 let upd = t
                     .LastUpdatedTime()
                     .map(|d| (d.UniversalTime - EPOCH_DIFF) / 10_000)
                     .unwrap_or(0);
-                (pos - start, (end - start).max(0), upd)
+                (pos.map(|p| p - start).unwrap_or(-1), (end - start).max(0), upd)
             }
-            Err(_) => (0, 0, 0),
+            Err(_) => (-1, 0, 0),
         };
 
-        Some(MediaState {
+        Some((MediaState {
             app_id,
             title,
             artist,
@@ -383,41 +405,56 @@ impl Media {
             updated_ms,
             can_prev,
             can_next,
-        })
+            can_seek,
+        }, props))
     }
 
-    pub fn thumbnail(&self) -> Option<Thumb> {
+    pub fn thumbnail(&self) -> std::result::Result<Thumb, String> {
         if self.winamp.get() {
-            return None;
+            return Err("Winamp не передаёт обложку".into());
         }
-        let s = self.session()?;
-        let props = s.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
-        let reference = props.Thumbnail().ok()?;
-        let stream = reference.OpenReadAsync().ok()?.join().ok()?;
-        let size = stream.Size().ok()? as u32;
-        if size == 0 || size > 8 * 1024 * 1024 {
-            return None;
+        let props = self.active_props.borrow();
+        let props = props.as_ref().ok_or("Нет метаданных медиасессии")?;
+        let reference = props.Thumbnail().map_err(|e| format!("Ссылка на обложку: {e}"))?;
+        let stream = reference.OpenReadAsync().and_then(|op| op.join())
+            .map_err(|e| format!("Открытие потока обложки: {e}"))?;
+        const LIMIT: u64 = 8 * 1024 * 1024;
+        let size = stream.Size().ok().filter(|s| *s > 0);
+        if size.is_some_and(|s| s > LIMIT) {
+            return Err("Обложка больше 8 МБ".into());
         }
-        let input = stream.GetInputStreamAt(0).ok()?;
-        let reader = DataReader::CreateDataReader(&input).ok()?;
-        // streams from some players (Dotify, Electron) arrive in pieces
-        let mut bytes = Vec::with_capacity(size as usize);
-        while (bytes.len() as u32) < size {
-            let got = reader.LoadAsync(size - bytes.len() as u32).ok()?.join().ok()?;
+        let input = stream.GetInputStreamAt(0).or_else(|_| stream.cast::<IInputStream>())
+            .map_err(|e| format!("Получение потока обложки: {e}"))?;
+        let reader = DataReader::CreateDataReader(&input).map_err(|e| format!("Подготовка чтения обложки: {e}"))?;
+        reader.SetInputStreamOptions(InputStreamOptions::Partial)
+            .map_err(|e| format!("Настройка чтения обложки: {e}"))?;
+        let mut bytes = Vec::new();
+        let length = size.unwrap_or(LIMIT + 1) as usize;
+        while bytes.len() < length {
+            let count = (length - bytes.len()).min(64 * 1024);
+            let got = reader.LoadAsync(count as u32).and_then(|op| op.join())
+                .map_err(|e| format!("Чтение обложки: {e}"))?;
             if got == 0 {
                 break;
             }
-            let mut chunk = vec![0u8; got as usize];
-            reader.ReadBytes(&mut chunk).ok()?;
-            bytes.extend_from_slice(&chunk);
+            let offset = bytes.len();
+            bytes.resize(offset + got as usize, 0);
+            reader.ReadBytes(&mut bytes[offset..]).map_err(|e| format!("Данные обложки: {e}"))?;
+        }
+        let _ = reader.DetachStream();
+        if bytes.len() as u64 > LIMIT {
+            return Err("Обложка больше 8 МБ".into());
+        }
+        if bytes.is_empty() || size.is_some_and(|s| s != bytes.len() as u64) {
+            return Err(format!("Неполный поток обложки: {} байт", bytes.len()));
         }
         if let Some(mime) = sniff(&bytes) {
-            return Some(Thumb { mime: mime.into(), bytes });
+            return Ok(Thumb { mime: mime.into(), bytes });
         }
         // a format WebView2 can't show, or a declared type that lies:
         // let Windows decode it and hand over PNG
-        let png = transcode(&stream)?;
-        Some(Thumb { mime: "image/png".into(), bytes: png })
+        let png = transcode(&stream).ok_or("Не удалось декодировать формат обложки")?;
+        Ok(Thumb { mime: "image/png".into(), bytes: png })
     }
 
     pub fn control(&self, action: &str, value: f64) -> Result<()> {
@@ -447,9 +484,13 @@ impl Media {
                 s.TrySkipPreviousAsync()?.join()?;
             }
             "seek" => {
+                if !value.is_finite() || !s.GetPlaybackInfo().and_then(|p| p.Controls())
+                    .and_then(|c| c.IsPlaybackPositionEnabled()).unwrap_or(false) {
+                    return Ok(());
+                }
                 // value: position in milliseconds, relative to StartTime
                 let start = s.GetTimelineProperties().and_then(|t| t.StartTime()).map(|d| d.Duration).unwrap_or(0);
-                let ticks = start + (value.max(0.0) * 10_000.0) as i64;
+                let ticks = start.saturating_add((value.max(0.0) * 10_000.0) as i64);
                 s.TryChangePlaybackPositionAsync(ticks)?.join()?;
             }
             _ => {}

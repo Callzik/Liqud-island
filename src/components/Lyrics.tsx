@@ -25,14 +25,14 @@ function OffsetControl({ track }: { track: string }) {
   );
 }
 
-export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "media" | "mediaAt" | "accent" | "lyrics">) {
+export function Lyrics({ media, playback, accent, lyrics }: Pick<PanelProps, "media" | "playback" | "accent" | "lyrics">) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lineEls = useRef<(HTMLDivElement | null)[]>([]);
   const placed = useRef(false);
 
-  const lines = lyrics.lines;
-  const idx = useLyricSync(lines, media, mediaAt, (i) => lineEls.current[i] ?? null);
+  const lines = playback?.anchor ? lyrics.lines : null;
+  const idx = useLyricSync(lines, media, playback, (i) => lineEls.current[i] ?? null);
   useLayoutEffect(() => {
     placed.current = false;
   }, [lines]);
@@ -82,7 +82,7 @@ export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "med
     return (
       <div className="ly-state" key="none">
         <div className="ly-state-title">Текст не найден</div>
-        <div className="hint">Для этого трека в базе LRCLIB ничего нет</div>
+        <div className="hint">Для этого трека нет доступного текста</div>
       </div>
     );
   }
@@ -100,8 +100,8 @@ export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "med
   if (!lines) {
     return (
       <div className="ly-wrap" style={{ "--ly-glow": glow } as CSSProperties}>
-        <div className="ly-plain">{data.plain}</div>
-        <div className="ly-credit">Без синхронизации · LRCLIB</div>
+        <div className="ly-plain">{data.plain ?? data.lines?.map((line) => line.text).join("\n")}</div>
+        <div className="ly-credit">Без синхронизации · {data.source}</div>
       </div>
     );
   }
@@ -119,8 +119,8 @@ export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "med
               }}
               className={`ly-line ${i === idx ? "act" : ""}`}
               data-far={d > 5 ? "" : undefined}
-              style={{ "--d": d } as CSSProperties}
-              onClick={() => call("media_control", { action: "seek", value: l.t }).catch(() => {})}
+              style={{ "--d": d, cursor: media.canSeek ? "pointer" : "default" } as CSSProperties}
+              onClick={media.canSeek ? () => call("media_control", { action: "seek", value: l.t }).catch(() => {}) : undefined}
             >
               <LyricWords words={l.words} />
             </div>
@@ -128,7 +128,7 @@ export function Lyrics({ media, mediaAt, accent, lyrics }: Pick<PanelProps, "med
         })}
       </div>
       {media && <OffsetControl track={offsetKey(media.artist, media.title)} />}
-      <div className="ly-credit">LRCLIB</div>
+      <div className="ly-credit">{data.source}</div>
     </div>
   );
 }

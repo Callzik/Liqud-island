@@ -28,6 +28,7 @@ import { DropZones, type DropZone } from "./components/DropZones";
 import { Panel, type Tab } from "./components/Panel";
 import { Launcher } from "./components/Launcher";
 import { useLyrics } from "./lib/useLyrics";
+import { updatePlaybackClock } from "./lib/playback";
 import { setYandexLyrics } from "./lib/lyrics";
 import { rainSoon, sky, deg, type WeatherPayload } from "./lib/weather";
 import { WeatherCompact } from "./components/Weather";
@@ -96,8 +97,9 @@ export default function App({ boot }: { boot: InitPayload }) {
 
   const [settings, setSettings] = useState<Settings>(boot.settings);
   const [media, setMedia] = useState<Media | null>(boot.media);
-  const [mediaAt, setMediaAt] = useState(Date.now());
-  const [cover, setCover] = useState<Cover>(boot.cover);
+  const [playback, setPlayback] = useState(() => updatePlaybackClock(null, boot.media));
+  const [reportedCover, setCover] = useState<Cover>(boot.cover);
+  const cover = reportedCover.id === media?.coverId ? reportedCover : { id: 0, url: null };
   const [accent, setAccent] = useState<RGB>(DEFAULT_ACCENT);
   const [volume, setVolume] = useState<Volume>(boot.volume);
   const [clips, setClips] = useState<Clip[]>(boot.clips);
@@ -191,7 +193,7 @@ export default function App({ boot }: { boot: InitPayload }) {
   // set during render, so the lyrics key below already knows the source
   setYandexLyrics(!!settings.ymToken);
   const lyrics = useLyrics(media);
-  const lyricsInIsland = mode === "music" && settings.lyricsInIsland !== false && !!lyrics.lines;
+  const lyricsInIsland = mode === "music" && settings.lyricsInIsland !== false && !!lyrics.lines && !!playback?.anchor;
 
   const box =
     mode === "launcher"
@@ -520,7 +522,8 @@ export default function App({ boot }: { boot: InitPayload }) {
       on<Media | null>("media", (m) => {
         const prev = live.current.media;
         setMedia(m);
-        setMediaAt(Date.now());
+        const receivedAt = Date.now();
+        setPlayback((previous) => updatePlaybackClock(previous, m, receivedAt));
         if (m && m.playing && (!prev || prev.title !== m.title || prev.artist !== m.artist) && !live.current.panelOpen) triggerPeek();
       }),
     );
@@ -790,8 +793,8 @@ export default function App({ boot }: { boot: InitPayload }) {
           <Compact
             cover={cover.url}
             media={media}
-            mediaAt={mediaAt}
-            lyrics={settings.lyricsInIsland !== false ? lyrics : { ...lyrics, lines: null }}
+            playback={playback}
+            lyrics={lyricsInIsland ? lyrics : { ...lyrics, lines: null }}
           />
         );
       case "peek":
@@ -810,7 +813,7 @@ export default function App({ boot }: { boot: InitPayload }) {
             settings={settings}
             saveSettings={saveSettings}
             media={media}
-            mediaAt={mediaAt}
+            playback={playback}
             cover={cover.url}
             lyrics={lyrics}
             accent={accent}
@@ -853,7 +856,7 @@ export default function App({ boot }: { boot: InitPayload }) {
       default:
         return null;
     }
-  }, [mode, aiThinking, cover.url, media, mediaAt, lyrics, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec, agents, agentSel, alert, asking.length]);
+  }, [mode, aiThinking, cover.url, media, playback, lyrics, lyricsInIsland, toast, drop, tab, pinned, settings, accent, volume, clips, shelf, pins, apps, usage, boot.version, saveSettings, closePanel, closeLauncher, showToast, hideToast, setBusy, bumpUsage, ask, clearAsk, setChatDrop, askAi, weather, voice, download, rec, agents, agentSel, alert, asking.length]);
 
   const onIslandClick = () => {
     if ((mode === "toast" && toast?.actions?.length) || mode === "voice") return;

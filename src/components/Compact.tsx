@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Media } from "../api";
+import type { PlaybackClock } from "../lib/playback";
 import { useLyricSync, type LyricsState } from "../lib/useLyrics";
 import { IMusic } from "./Icons";
 
@@ -38,7 +39,7 @@ const FONT_MIN = 12.5;
 const FADE = 18;
 
 /** Music playing, island collapsed: artwork on the left, the current lyric line in the middle, bars are drawn on the canvas. */
-export function Compact({ cover, media, mediaAt, lyrics }: { cover: string | null; media: Media | null; mediaAt: number; lyrics: LyricsState }) {
+export function Compact({ cover, media, playback, lyrics }: { cover: string | null; media: Media | null; playback: PlaybackClock | null; lyrics: LyricsState }) {
   const lines = lyrics.lines;
   const wrapRef = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<number, HTMLDivElement>());
@@ -66,7 +67,7 @@ export function Compact({ cover, media, mediaAt, lyrics }: { cover: string | nul
     if (s.fr !== fr) wrap.style.setProperty("--fr", `${(s.fr = fr)}px`);
   };
 
-  const idx = useLyricSync(lines, media, mediaAt, (i) => els.current.get(i) ?? null, onSweep);
+  const idx = useLyricSync(lines, media, playback, (i) => els.current.get(i) ?? null, onSweep);
 
   // the current line plus the one fading out
   const [shown, setShown] = useState<{ i: number; out: boolean }[]>([]);

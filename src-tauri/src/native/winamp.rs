@@ -64,6 +64,7 @@ pub fn state() -> Option<MediaState> {
         updated_ms: crate::store::now_ms(),
         can_prev: true,
         can_next: true,
+        can_seek: len > 0,
     })
 }
 

@@ -33,6 +33,7 @@ function ContextBar({ s, wide }: { s: AgentSession; wide?: boolean }) {
 function Dot({ s }: { s: AgentSession }) {
   const color = SOURCES[s.source].color;
   if (needsYou(s)) return <span className="ag-dot ring" style={{ color }} />;
+  if (s.status === "stale") return <span className="ag-dot stale" />;
   return <span className={`ag-dot ${isBusy(s) ? "busy" : "rest"}`} style={{ background: isBusy(s) ? color : undefined }} />;
 }
 
@@ -51,7 +52,17 @@ export function headline(list: AgentSession[]): { icon: boolean; text: string } 
   if (waiting) return { icon: true, text: `Нужны вы: ${waiting}` };
   const busy = list.filter(isBusy).length;
   if (busy) return { icon: false, text: `Работают: ${busy}` };
+  const stale = list.filter((s) => s.status === "stale").length;
+  if (stale) return { icon: false, text: `Нет свежих данных: ${stale}` };
   return { icon: false, text: list.length ? `Отдыхают: ${list.length}` : "" };
+}
+
+function LastAgentUpdate({ updatedMs }: { updatedMs: number }) {
+  if (!updatedMs) return null;
+  const date = new Date(updatedMs);
+  return <time className="ag-last-update" dateTime={date.toISOString()} title={`Последнее событие: ${date.toLocaleString("ru-RU")}`}>
+    Событие в {date.toLocaleTimeString("ru-RU")}
+  </time>;
 }
 
 export function AgentsTab({
@@ -161,6 +172,7 @@ export function AgentsTab({
                     {s.client && <span className="ag-location">{place(s).name}</span>}
                     {s.title && s.project && <span className="ag-project">· {s.project}</span>}
                     <span className="ag-act">· {s.action}</span>
+                    {s.status === "stale" && <LastAgentUpdate updatedMs={s.updatedMs} />}
                   </span>
                 </span>
                 <ContextBar s={s} />
@@ -288,6 +300,7 @@ function Detail({ s, now, setBusy }: { s: AgentSession; now: number; setBusy: (b
             <span>
               <span className="ag-ask-title">{needsYou(s) ? "Ждёт вас" : isBusy(s) ? "Сейчас" : "Последнее"}</span>
               <b>{s.action}</b>
+              {s.status === "stale" && <LastAgentUpdate updatedMs={s.updatedMs} />}
             </span>
           </div>
           <div className="ag-actions">

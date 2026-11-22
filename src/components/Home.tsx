@@ -3,6 +3,7 @@ import { call, type Clip, type PinItem } from "../api";
 import { css } from "../lib/color";
 import { ago, clock } from "../lib/format";
 import { useIcon } from "../lib/icons";
+import { playbackPosition } from "../lib/playback";
 import { Cover } from "./Compact";
 import { ICheck, IChevron, IHeart, IHeartOff, ICommand, IEraser, IFullscreen, IMic, IMute, IPipette, IQr, IRecord, IScanText, INext, IPause, IPlay, IPlus, IPrev, IRegion, ISpeaker, IVolume, IClose, IMusic, ISwap } from "./Icons";
 import type { PanelProps } from "./Panel";
@@ -44,14 +45,15 @@ function useYm(media: PanelProps["media"], token: string) {
 
 function MediaCard({
   media,
-  mediaAt,
+  playback,
   cover,
   accent,
   settings,
   saveSettings,
   toast,
   setTab,
-}: Pick<PanelProps, "media" | "mediaAt" | "cover" | "accent" | "settings" | "saveSettings" | "toast" | "setTab">) {
+  onClose,
+}: Pick<PanelProps, "media" | "playback" | "cover" | "accent" | "settings" | "saveSettings" | "toast" | "setTab" | "onClose">) {
   const [ym, setYm, ymPlayer] = useYm(media, settings.ymToken);
   const rate = async (kind: "like" | "dislike") => {
     if (!settings.ymToken) {
@@ -74,7 +76,7 @@ function MediaCard({
       toast({ icon: "error", tone: "error", title: "Не получилось", subtitle: String(e) }, 3500);
     }
   };
-  const now = useTicker(!!media?.playing || !media, media ? 250 : 1000);
+  const now = useTicker((!!playback?.anchor && !!media?.playing) || !media, media ? 250 : 1000);
   const [sources, setSources] = useState(false);
   if (media && sources) return <SourceList current={media.appId} onClose={() => setSources(false)} />;
   if (!media) {
@@ -87,17 +89,23 @@ function MediaCard({
       </div>
     );
   }
-  // players report the position with the time it was sampled
-  const base = media.updatedMs > 0 && Math.abs(now - media.updatedMs) < 6 * 3600e3 ? media.updatedMs : mediaAt;
   const dur = media.durationMs;
-  const pos = Math.min(dur || Infinity, media.positionMs + (media.playing ? Math.max(0, now - base) : 0));
-  const pct = dur > 0 ? Math.max(0, Math.min(1, pos / dur)) : 0;
+  const pos = playbackPosition(playback, now);
+  const pct = dur > 0 && pos !== null ? Math.min(1, pos / dur) : 0;
+  const canSeek = media.canSeek && dur > 0;
+  const seekHint = canSeek ? "Перемотать" : media.canSeek ? "Длительность трека неизвестна" : `${media.app} не принимает перемотку из Island`;
 
   const seek = (e: MouseEvent<HTMLDivElement>) => {
-    if (!dur) return;
+    if (!canSeek) return;
     const r = e.currentTarget.getBoundingClientRect();
     const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
     call("media_control", { action: "seek", value: f * dur });
+  };
+
+  const openPlayer = async () => {
+    const opened = await call<boolean>("media_open_player", { appId: media.appId }).catch(() => false);
+    if (opened) onClose();
+    else toast({ icon: "error", tone: "error", title: `Не удалось открыть ${media.app}` }, 2500);
   };
 
   return (
@@ -108,7 +116,9 @@ function MediaCard({
       <Cover url={cover} size={128} radius={18} />
       <div className="media-info">
         <div className="media-app">
-          {media.app}
+          <button type="button" className="media-open" onClick={openPlayer} title={`Открыть ${media.app}`} aria-label={`Открыть ${media.app}`}>
+            {media.app}
+          </button>
           {(ymPlayer || settings.ytAuto) && (
             <button
               className={`uncensored ${settings.ytAuto ? "on" : ""}`}
@@ -149,12 +159,12 @@ function MediaCard({
         <div className="media-artist" title={media.artist}>
           {media.artist}
         </div>
-        <div className="progress" onClick={seek} style={{ cursor: dur ? "pointer" : "default" }}>
+        <div className="progress" onClick={canSeek ? seek : undefined} title={seekHint} style={{ cursor: canSeek ? "pointer" : "default" }}>
           <div className="progress-fill" style={{ width: `${pct * 100}%`, background: css(accent) }} />
         </div>
         <div className="media-times">
-          <span>{dur ? clock(pos) : ""}</span>
-          <span>{dur ? `-${clock(dur - pos)}` : ""}</span>
+          <span>{pos !== null ? clock(pos) : "Позиция недоступна"}</span>
+          <span>{dur > 0 && (pos === null ? clock(dur) : `-${clock(Math.max(0, dur - pos))}`)}</span>
         </div>
         <div className="media-controls">
           {ymPlayer && (
@@ -465,7 +475,7 @@ export function Home(p: PanelProps) {
       {left && (
         <div className="home-left">
           {(showPlayer || showClock) && (
-            <MediaCard media={p.media} mediaAt={p.mediaAt} cover={p.cover} accent={p.accent} settings={p.settings} saveSettings={p.saveSettings} toast={p.toast} setTab={p.setTab} />
+            <MediaCard media={p.media} playback={p.playback} cover={p.cover} accent={p.accent} settings={p.settings} saveSettings={p.saveSettings} toast={p.toast} setTab={p.setTab} onClose={p.onClose} />
           )}
           {showRecent && <RecentClips clips={p.clips} onClose={p.onClose} setTab={p.setTab} />}
           {showVolume && <VolumeRow volume={p.volume} media={p.media} />}

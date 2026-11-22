@@ -89,7 +89,7 @@ pub struct Session {
     pub title: String,
     pub project: String,
     pub cwd: String,
-    /// working | thinking | permission | question | waiting | done | idle
+    /// working | thinking | permission | question | waiting | done | idle | stale
     pub status: String,
     pub action: String,
     /// share of the context window in use, 0..1
@@ -1352,6 +1352,15 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
             _ => relevant = sub == "reasoning" || sub == "agent_reasoning",
         }
         if relevant {
+            if s.status == "stale" {
+                if f.calls.running() {
+                    s.status = "working".into();
+                    s.action = "Выполняет команды".into();
+                } else {
+                    s.status = "thinking".into();
+                    s.action = "Думает…".into();
+                }
+            }
             touched = true;
             s.updated_ms = mtime.max(s.updated_ms);
         }
@@ -1360,8 +1369,8 @@ fn codex_read(p: &Path, f: &mut CodexFile, mtime: i64, now: i64) -> bool {
     if let Some(s) = all.get_mut(&f.key) {
         let quiet = now - mtime;
         if !f.finished && quiet > 120_000 && matches!(s.status.as_str(), "working" | "thinking") {
-            s.status = "idle".into();
-            s.action = "Нет обновлений от Codex".into();
+            s.status = "stale".into();
+            s.action = "Нет свежих данных".into();
             touched = true;
         }
     }

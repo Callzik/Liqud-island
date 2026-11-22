@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "../api";
 import { fetchLyrics, lyricsKey, type LyricLine, type LyricsData } from "./lyrics";
-import { runLyricSync, playbackState } from "./lyricSync";
+import { runLyricSync } from "./lyricSync";
+import { playbackPosition, type PlaybackClock } from "./playback";
 import { getOffset, offsetKey } from "./lyricOffset";
 
 export interface LyricsState {
@@ -55,15 +56,15 @@ export function useLyrics(media: Media | null): LyricsState {
 export function useLyricSync(
   lines: LyricLine[] | null,
   media: Media | null,
-  mediaAt: number,
+  playback: PlaybackClock | null,
   lineEl: (i: number) => HTMLElement | null,
   onSweep?: (el: HTMLElement, x: number) => void,
 ): number {
   const [idx, setIdx] = useState(-1);
   const mref = useRef(media);
   mref.current = media;
-  const aref = useRef(mediaAt);
-  aref.current = mediaAt;
+  const clock = useRef(playback);
+  clock.current = playback;
   const eref = useRef(lineEl);
   eref.current = lineEl;
   const sref = useRef(onSweep);
@@ -76,9 +77,9 @@ export function useLyricSync(
       lines,
       () => {
         const m = mref.current;
-        const st = playbackState(m, aref.current);
+        const pos = playbackPosition(clock.current);
         // the user's per-track nudge: positive = highlight earlier
-        return st && m ? { ...st, pos: st.pos + getOffset(offsetKey(m.artist, m.title)) } : st;
+        return pos === null || !m ? null : { pos: pos + getOffset(offsetKey(m.artist, m.title)), playing: m.playing };
       },
       setIdx,
       (i) => eref.current(i),

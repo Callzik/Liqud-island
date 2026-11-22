@@ -102,6 +102,7 @@ const state = {
     updatedMs: now,
     canPrev: true,
     canNext: true,
+    canSeek: true,
     coverId: 1,
   },
   volume: { level: 0.62, muted: false, device: "Динамики" },
@@ -165,13 +166,6 @@ function mockAsk() {
 
 let mockTimers: any[] = [];
 let mockAppVol = 0.4;
-setInterval(() => {
-  const due = mockTimers.filter((t) => t.atMs <= Date.now());
-  if (!due.length) return;
-  mockTimers = mockTimers.filter((t) => t.atMs > Date.now());
-  due.forEach((t) => mockEmit("alarm", t));
-  mockEmit("timers", mockTimers);
-}, 500);
 const mockSys = { wifi: true, bluetooth: true, dark: true, ssid: "Home-5G", vpn: [{ name: "Dash", connected: true }, { name: "Работа", connected: false }] };
 const mockNets = [
   { ssid: "Home-5G", signal: 92, secure: true, connected: true, known: true },
@@ -276,6 +270,8 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any> = {})
       const names: Record<string, string> = { "Spotify.exe": "Spotify", MSEdge: "Edge", "Telegram.TelegramDesktop": "Telegram" };
       return r(ids.map((id) => ({ id, name: names[id], hidden: hidden.includes(id) })));
     }
+    case "media_open_player":
+      return true as T;
     case "media_control":
       if (args.action === "toggle") {
         state.media = { ...state.media, playing: !state.media.playing, updatedMs: Date.now() };
@@ -483,6 +479,14 @@ function demoWeather() {
 // --- simulated native events -------------------------------------------------
 
 if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ === undefined) {
+  setInterval(() => {
+    const due = mockTimers.filter((t) => t.atMs <= Date.now());
+    if (!due.length) return;
+    mockTimers = mockTimers.filter((t) => t.atMs > Date.now());
+    due.forEach((t) => mockEmit("alarm", t));
+    mockEmit("timers", mockTimers);
+  }, 500);
+
   let lmb = false;
   window.addEventListener("mousedown", () => (lmb = true));
   window.addEventListener("mouseup", () => (lmb = false));

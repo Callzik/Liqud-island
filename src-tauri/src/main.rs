@@ -140,6 +140,7 @@ struct MediaPayload {
     updated_ms: i64,
     can_prev: bool,
     can_next: bool,
+    can_seek: bool,
     /// Changes whenever the cover image changes (see the "cover" event).
     cover_id: u32,
 }
@@ -634,17 +635,22 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
             let mut cover_tries = 0u32;
             let mut cover_id = 0u32;
             let mut has_cover = false;
+            let mut next_cover_try = Instant::now();
+            let mut cover_status = String::from("Медиасессия ещё не выбрана");
+            let mut cover_cache = std::collections::VecDeque::<(String, String)>::new();
+            const COVER_RETRY_MS: &[u64] = &[250, 650, 1_400, 3_000, 6_000, 12_000, 24_000];
+            const COVER_CACHE_LIMIT: usize = 24 * 1024 * 1024;
             let mut auto_key = String::new();
             loop {
                 // while music plays the position is re-read more often: lyrics follow it
                 let poll = if shared.media_playing.load(Ordering::Relaxed) { 300 } else { 700 };
                 match rx.recv_timeout(Duration::from_millis(poll)) {
                     Ok(cmd) => {
-                        route_media(&app, &shared, &media, &cmd);
+                        route_media(&app, &shared, &media, &cmd, &cover_status);
                         // quick clicks (next, next, next) go out together, then
                         // one pause lets the player update its state
                         while let Ok(more) = rx.try_recv() {
-                            route_media(&app, &shared, &media, &more);
+                            route_media(&app, &shared, &media, &more, &cover_status);
                         }
                         thread::sleep(Duration::from_millis(250));
                     }
@@ -667,28 +673,50 @@ fn spawn_media_thread(app: AppHandle, shared: Arc<Shared>, rx: Receiver<MediaCmd
                     if key != cover_key {
                         cover_key = key;
                         cover_tries = 0;
-                        has_cover = false;
+                        next_cover_try = Instant::now();
                         cover_id = cover_id.wrapping_add(1);
-                        let cp = CoverPayload { id: cover_id, url: None };
+                        let cached = cover_cache.iter().position(|(key, _)| *key == cover_key)
+                            .and_then(|i| cover_cache.remove(i));
+                        let url = cached.as_ref().map(|(_, url)| url.clone());
+                        if let Some(entry) = cached {
+                            cover_cache.push_back(entry);
+                        }
+                        has_cover = url.is_some();
+                        cover_status = if has_cover { "Из кэша" } else { "Ожидание обложки" }.into();
+                        let cp = CoverPayload { id: cover_id, url };
                         *lock(&shared.cover) = cp.clone();
                         let _ = app.emit("cover", cp);
                     }
                     // Players often publish artwork a moment after the metadata.
-                    if !has_cover && cover_tries < 6 {
+                    if !has_cover && cover_tries as usize <= COVER_RETRY_MS.len() && Instant::now() >= next_cover_try {
+                        let delay = COVER_RETRY_MS.get(cover_tries as usize).copied().unwrap_or_default();
                         cover_tries += 1;
-                        if let Some(t) = media.thumbnail() {
-                            has_cover = true;
-                            let cp = CoverPayload {
-                                id: cover_id,
-                                url: Some(util::data_url(&t.mime, &t.bytes)),
-                            };
-                            *lock(&shared.cover) = cp.clone();
-                            let _ = app.emit("cover", cp);
+                        match media.thumbnail() {
+                            Ok(t) => {
+                                has_cover = true;
+                                cover_status = format!("Загружена: {}, {} байт", t.mime, t.bytes.len());
+                                let url = util::data_url(&t.mime, &t.bytes);
+                                cover_cache.push_back((cover_key.clone(), url.clone()));
+                                while cover_cache.iter().map(|(_, url)| url.len()).sum::<usize>() > COVER_CACHE_LIMIT {
+                                    cover_cache.pop_front();
+                                }
+                                let cp = CoverPayload { id: cover_id, url: Some(url) };
+                                *lock(&shared.cover) = cp.clone();
+                                let _ = app.emit("cover", cp);
+                            }
+                            Err(e) => {
+                                cover_status = format!("Попытка {cover_tries}: {e}");
+                                next_cover_try = Instant::now() + Duration::from_millis(delay);
+                                if cover_tries as usize > COVER_RETRY_MS.len() {
+                                    log::write("INFO", &format!("Обложка для {} недоступна: {e}", s.app_id));
+                                }
+                            }
                         }
                     }
                 }
                 let payload = state.map(|s| MediaPayload {
                     app: media_app_name(&shared, &s.app_id),
+                    can_seek: s.can_seek || routes_through_youtube(&app, &shared, &s.app_id),
                     app_id: s.app_id,
                     title: s.title,
                     artist: s.artist,
@@ -1243,6 +1271,50 @@ fn media_control(state: St<'_>, action: String, value: Option<f64>) {
         action,
         value: value.unwrap_or(0.0),
     });
+}
+
+#[tauri::command]
+async fn media_open_player(app: AppHandle, state: St<'_>, app_id: String) -> Result<bool, String> {
+    let active = lock(&state.media).as_ref().filter(|m| m.app_id == app_id).cloned();
+    let Some(active) = active else { return Ok(false) };
+    if own_youtube_session(&active.app_id) {
+        if let Some(window) = app.get_webview_window("yt") {
+            return Ok(show_youtube_window(&window));
+        }
+    }
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = active.app_id;
+        let id_file = id.rsplit(['\\', '/']).next().unwrap_or(&id).to_lowercase();
+        let name = app_name_from_id(&id);
+        let exe = if id_file.ends_with(".exe") {
+            id_file
+        } else {
+            match known_app_name(&id).as_deref() {
+                Some("Edge") => "msedge.exe".into(),
+                Some("Firefox") => "firefox.exe".into(),
+                Some("Winamp") => "winamp.exe".into(),
+                _ => format!("{}.exe", name.to_lowercase()),
+            }
+        };
+        let pids = native::proc::pids_by_exe(&[&exe]);
+        let previous = shared.last_fg.load(Ordering::Relaxed);
+        if pids.contains(&native::proc::window_pid(previous)) && input::activate(previous) {
+            return true;
+        }
+        let window = native::proc::window_for_pids(&pids);
+        if window != 0 && input::activate(window) {
+            return true;
+        }
+        // AUMIDs can differ from process names (especially Store apps).
+        // Only launch an entry registered with Windows, never a raw media id.
+        shared.shell.run(move || {
+            let Ok(apps) = shell::list_apps() else { return false };
+            let entry = apps.iter().find(|a| a.id.eq_ignore_ascii_case(&id))
+                .or_else(|| apps.iter().find(|a| a.name.eq_ignore_ascii_case(&active.app)));
+            entry.is_some_and(|a| shell::open(&format!("app:{}", a.id)))
+        }).unwrap_or(false)
+    }).await.map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
@@ -2504,6 +2576,16 @@ const YM: &[&str] = &["yandex"];
 /// how the island's own WebView2 media session shows up in Windows
 const OWN_PLAYER: &str = "island|webview";
 
+fn own_youtube_session(app_id: &str) -> bool {
+    let id = app_id.to_lowercase();
+    OWN_PLAYER.split('|').any(|part| id.contains(part))
+}
+
+fn routes_through_youtube(app: &AppHandle, shared: &Shared, app_id: &str) -> bool {
+    shared.yt_active.load(Ordering::Relaxed) && app.get_webview_window("yt").is_some()
+        && (own_youtube_session(app_id) || YM.iter().any(|part| app_id.to_lowercase().contains(part)))
+}
+
 /// Injected into the YouTube window: reports the end of a track by "navigating"
 /// to a sentinel address (cancelled in on_navigation), since external pages
 /// have no IPC.
@@ -2537,9 +2619,13 @@ fn yt_eval(app: &AppHandle, js: &str) {
 
 /// Island buttons while YouTube plays: play/pause/seek go to the YouTube page,
 /// next/previous move Yandex Music's queue (which then hands the track over again).
-fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) {
+fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd, cover_status: &str) {
     if cmd.action == "dump" {
-        let ok = clip::write_text(&media.dump(|id| media_app_name(shared, id)));
+        let mut report = media.dump(|id| media_app_name(shared, id));
+        if let Some(active) = lock(&shared.media).as_ref() {
+            report.push_str(&format!("\nВыбранный источник: {} — {}\nОбложка: {cover_status}\n", active.app, active.title));
+        }
+        let ok = clip::write_text(&report);
         toast(
             app,
             ToastPayload {
@@ -2558,7 +2644,8 @@ fn route_media(app: &AppHandle, shared: &Shared, media: &Media, cmd: &MediaCmd) 
         let _ = media.control_of(YM, a, cmd.value);
         return;
     }
-    if shared.yt_active.load(Ordering::Relaxed) && app.get_webview_window("yt").is_some() {
+    let selected_app = lock(&shared.media).as_ref().map(|m| m.app_id.clone());
+    if selected_app.as_deref().is_some_and(|id| routes_through_youtube(app, shared, id)) {
         match cmd.action.as_str() {
             "toggle" => yt_eval(app, "(function(){var v=document.querySelector('video');if(v){v.paused?v.play():v.pause()}})()"),
             "pause" => yt_eval(app, "(function(){var v=document.querySelector('video');if(v)v.pause()})()"),
@@ -2728,14 +2815,17 @@ fn auto_uncensored(app: &AppHandle, shared: &Arc<Shared>, media: &Media, auto_ke
 }
 
 /// Shows the YouTube player window (sign in once; Premium = no ads).
+fn show_youtube_window(w: &WebviewWindow) -> bool {
+    let _ = w.set_skip_taskbar(false);
+    let _ = w.unminimize();
+    w.show().and_then(|_| w.set_focus()).is_ok()
+}
+
 #[tauri::command]
 async fn yt_show(app: AppHandle, state: St<'_>) -> Result<(), String> {
     let shared = state.inner().clone();
     if let Some(w) = app.get_webview_window("yt") {
-        let _ = w.set_skip_taskbar(false);
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
+        let _ = show_youtube_window(&w);
         return Ok(());
     }
     yt_open(&app, &shared, "https://music.youtube.com/", true).await
@@ -3370,6 +3460,7 @@ fn main() {
             launcher_closed,
             open_launcher,
             media_control,
+            media_open_player,
             media_apps,
             volume_set,
             volume_mute,

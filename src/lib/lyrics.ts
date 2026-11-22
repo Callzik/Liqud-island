@@ -18,6 +18,7 @@ export interface LyricLine {
 }
 
 export interface LyricsData {
+  source: "LRCLIB" | "Яндекс Музыка";
   lines: LyricLine[] | null;
   plain: string | null;
   instrumental: boolean;
@@ -85,17 +86,18 @@ async function getJson(url: string, signal: AbortSignal): Promise<unknown> {
   return r.json();
 }
 
-function pick(items: Item[], durationMs: number): Item | null {
+function pick(items: Item[], durationMs: number): LyricsData | null {
   const d = durationMs / 1000;
-  let best: Item | null = null;
+  let best: LyricsData | null = null;
   let bestScore = Infinity;
   for (const it of items) {
-    if (!it.syncedLyrics && !it.plainLyrics && !it.instrumental) continue;
     const diff = d > 0 && it.duration ? Math.abs(it.duration - d) : 0;
     if (d > 0 && it.duration && diff > 6) continue;
-    const score = diff + (it.syncedLyrics ? 0 : 100);
+    const data = toData(it, "LRCLIB");
+    if (!data) continue;
+    const score = diff + (data.lines ? 0 : 100);
     if (score < bestScore) {
-      best = it;
+      best = data;
       bestScore = score;
     }
   }
@@ -177,29 +179,38 @@ export function parseLrc(src: string): LyricLine[] {
   return out;
 }
 
-function toData(it: Item): LyricsData {
-  const lines = it.syncedLyrics ? parseLrc(it.syncedLyrics) : null;
+function isServiceMessage(text: string): boolean {
+  const message = norm(text.replace(/\[[^\]]*\]|<[^>]*>/g, ""));
+  return /^(?:подключите|оформите|активируйте|купите) .*подписк[а-я]+.*текст[а-я]* (?:этой )?(?:пес[а-я]+|трек[а-я]+)$/u.test(message)
+    || /^текст[а-я]* (?:пес[а-я]+|трек[а-я]+) (?:доступ[а-я]*|недоступ[а-я]*).*подписк[а-я]*/u.test(message)
+    || /^(?:subscribe|upgrade) .* (?:see|view|read) (?:the )?lyrics$/i.test(message);
+}
+
+function toData(it: Item | null | undefined, source: LyricsData["source"]): LyricsData | null {
+  if (!it) return null;
+  const synced = typeof it.syncedLyrics === "string" ? it.syncedLyrics.trim() : "";
+  const plain = typeof it.plainLyrics === "string" ? it.plainLyrics.trim() : "";
+  const lines = synced && !isServiceMessage(synced) ? parseLrc(synced) : null;
+  const cleanPlain = plain && !isServiceMessage(plain) ? plain : null;
+  if (!lines?.length && !cleanPlain && !it.instrumental) return null;
   return {
+    source,
     lines: lines && lines.length ? lines : null,
-    plain: it.plainLyrics?.trim() || null,
+    plain: cleanPlain,
     instrumental: !!it.instrumental,
   };
 }
 
-function useful(it: Item | null | undefined): it is Item {
-  return !!it && !!(it.syncedLyrics || it.plainLyrics || it.instrumental);
-}
-
 /** Resolves as soon as a task gives synced lyrics; otherwise waits for all of
  *  them and takes the first plain-text / instrumental result. */
-function bestOf(tasks: Promise<Item | null>[]): Promise<Item | null> {
+function bestOf(tasks: Promise<LyricsData | null>[]): Promise<LyricsData | null> {
   return new Promise((resolve) => {
     let left = tasks.length;
-    let fallback: Item | null = null;
+    let fallback: LyricsData | null = null;
     if (!left) return resolve(null);
     for (const t of tasks) {
       t.then((v) => {
-        if (v?.syncedLyrics) return resolve(v);
+        if (v?.lines) return resolve(v);
         if (v && !fallback) fallback = v;
         if (--left === 0) resolve(fallback);
       });
@@ -219,29 +230,21 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
   const bare = bareTitle(q.title) || title;
   const titles = [...new Set([q.title, title, bare, bare.replace(/ё/gi, (m) => (m === "Ё" ? "Е" : "е"))])];
 
-  // 1) Yandex Music: synced lyrics there cover many Russian tracks LRCLIB lacks
-  let ymPlain: Item | null = null;
-  if (yandexOn && isTauri) {
-    const ym = await Promise.race([
+  // Prefer Yandex's synced text when configured. Start the fallback lookups
+  // alongside it so a slow Yandex request cannot consume their time budget.
+  const yandex = yandexOn && isTauri
+    ? Promise.race([
       call<{ synced?: string | null; plain?: string | null } | null>("ym_lyrics", {
         artist: q.artist,
         title: q.title,
         durationMs: q.durationMs,
       }).catch(() => null),
       new Promise<null>((r) => setTimeout(() => r(null), 6000)),
-    ]);
-    if (ym?.synced) {
-      const data = toData({ syncedLyrics: ym.synced, plainLyrics: ym.plain ?? null });
-      if (data.lines) {
-        cache.set(key, data);
-        return data;
-      }
-    }
-    if (ym?.plain) ymPlain = { plainLyrics: ym.plain };
-  }
+    ]).then((ym) => ym && toData({ syncedLyrics: ym.synced, plainLyrics: ym.plain }, "Яндекс Музыка"))
+    : Promise.resolve(null);
 
   // 2) LRCLIB: every lookup runs at the same time — the first synced answer wins
-  const tasks: Promise<Item | null>[] = [];
+  const tasks: Promise<LyricsData | null>[] = [];
   if (q.album && q.durationMs > 0) {
     const p = new URLSearchParams({
       artist_name: q.artist,
@@ -249,7 +252,7 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
       album_name: q.album,
       duration: String(Math.round(q.durationMs / 1000)),
     });
-    tasks.push(getJson(`${BASE}/get?${p}`, signal).then((it) => (useful(it as Item) ? (it as Item) : null)));
+    tasks.push(getJson(`${BASE}/get?${p}`, signal).then((it) => toData(it as Item | null, "LRCLIB")));
   }
   const search = (p: URLSearchParams, strictArtist = false) =>
     getJson(`${BASE}/search?${p}`, signal).then((l) =>
@@ -263,7 +266,7 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
   // a failed request (offline at startup, 429/5xx) must not be remembered as
   // "this song has no lyrics" — only a clean "not found" is
   let failed = false;
-  const found = await bestOf(
+  const lrclib = bestOf(
     tasks.map((t) =>
       t.catch(() => {
         failed = true;
@@ -271,12 +274,13 @@ export async function fetchLyrics(q: LyricsQuery, signal: AbortSignal): Promise<
       }),
     ),
   );
+  const ym = await yandex;
+  const found = ym?.lines ? ym : await lrclib;
   // timed out waiting for a synced version: plain text found so far still counts
-  if (signal.aborted && !found) throw new DOMException("aborted", "AbortError");
+  if (signal.aborted && !found && !ym) throw new DOMException("aborted", "AbortError");
 
   // LRCLIB plain text vs Yandex plain text: either is better than nothing
-  const best = found ?? ymPlain;
-  const data = best ? toData(best) : null;
+  const data = found ?? ym;
   if (data || !failed) {
     cache.set(key, data);
     if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);

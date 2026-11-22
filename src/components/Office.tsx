@@ -348,11 +348,11 @@ interface Target {
 }
 
 function targetOf(s: AgentSession): Target | null {
-  if (needsYou(s) || isBusy(s)) {
+  if (needsYou(s) || isBusy(s) || s.status === "stale") {
     restOf.delete(s.id);
     const d = deskOf.get(s.id);
     if (d === undefined) return null;
-    if (needsYou(s)) {
+    if (needsYou(s) || s.status === "stale") {
       const p = standOf(d);
       return { ...p, spot: `stand${d}`, sit: null };
     }
@@ -560,7 +560,7 @@ export function Office({ agents, onOpen }: { agents: AgentsPayload; onOpen: (id:
           {list.map((s) => {
             const src = SOURCES[s.source];
             const waiting = needsYou(s);
-            const resting = !waiting && !isBusy(s);
+            const resting = !waiting && !isBusy(s) && s.status !== "stale";
             return (
               <button
                 key={s.id}

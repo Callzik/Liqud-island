@@ -18,6 +18,7 @@ import { ShelfTab } from "./ShelfTab";
 import { SettingsTab } from "./SettingsTab";
 import type { ToastData } from "./Toast";
 import type { LyricsState } from "../lib/useLyrics";
+import type { PlaybackClock } from "../lib/playback";
 
 export type { Tab } from "./panelTabs";
 
@@ -29,7 +30,7 @@ export interface PanelProps {
   settings: Settings;
   saveSettings: (patch: Partial<Settings>) => void;
   media: Media | null;
-  mediaAt: number;
+  playback: PlaybackClock | null;
   cover: string | null;
   lyrics: LyricsState;
   accent: RGB;
@@ -62,9 +63,8 @@ export function Panel(p: PanelProps) {
       <header className="panel-head">
         <nav className="tabs">
           {tabs.map(({ id, label, Icon }) => (
-            <button key={id} className={`tab ${p.tab === id ? "active" : ""}`} onClick={() => p.setTab(id)} title={label}>
+            <button key={id} className={`tab ${p.tab === id ? "active" : ""}`} onClick={() => p.setTab(id)} title={label} aria-label={label} aria-current={p.tab === id ? "page" : undefined}>
               <Icon size={18} />
-              {p.tab === id && <span>{label}</span>}
               {id === "shelf" && p.shelf.length > 0 && p.tab !== id && <i className="tab-badge">{p.shelf.length}</i>}
               {id === "agents" && p.tab !== id && waiting > 0 && <i className="tab-badge hot">{waiting}</i>}
             </button>
@@ -90,7 +90,7 @@ export function Panel(p: PanelProps) {
       <section className="panel-body">
         {p.tab === "home" && <Home {...p} />}
         {p.tab === "controls" && <ControlCenter />}
-        {p.tab === "lyrics" && <Lyrics media={p.media} mediaAt={p.mediaAt} accent={p.accent} lyrics={p.lyrics} />}
+        {p.tab === "lyrics" && <Lyrics media={p.media} playback={p.playback} accent={p.accent} lyrics={p.lyrics} />}
         {p.tab === "chat" && (
           <Chat
             settings={p.settings}

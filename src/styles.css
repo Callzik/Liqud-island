@@ -306,8 +306,8 @@ input::placeholder {
 .tab {
   position: relative;
   height: 38px;
-  min-width: 40px;
-  padding: 0 11px;
+  width: 40px;
+  padding: 0;
   border-radius: 13px;
   display: flex;
   align-items: center;
@@ -327,8 +327,6 @@ input::placeholder {
 .tab.active {
   background: var(--raised);
   color: var(--text);
-  font-weight: 600;
-  padding: 0 14px 0 12px;
 }
 
 .tab-badge {
@@ -3051,6 +3049,23 @@ html.is-overlay body {
   gap: 8px;
 }
 
+.media-open {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.media-open:hover,
+.media-open:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .uncensored {
   height: 20px;
   padding: 0 8px;
@@ -3153,6 +3168,20 @@ html.is-overlay body {
 
 .ag-dot.rest {
   background: rgba(255, 255, 255, 0.28);
+}
+
+.ag-dot.stale {
+  border: 1px solid var(--muted);
+}
+
+.ag-last-update {
+  flex-shrink: 0;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ag-line .ag-last-update::before {
+  content: "· ";
 }
 
 .ag-dot.busy {

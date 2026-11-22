@@ -108,6 +108,7 @@ export interface Media {
   updatedMs: number;
   canPrev: boolean;
   canNext: boolean;
+  canSeek: boolean;
   coverId: number;
 }
 
@@ -170,7 +171,7 @@ export interface AgentRequest {
   timeoutMs: number;
 }
 
-export type AgentStatus = "working" | "thinking" | "permission" | "question" | "waiting" | "done" | "idle";
+export type AgentStatus = "working" | "thinking" | "permission" | "question" | "waiting" | "done" | "idle" | "stale";
 
 export interface AgentSession {
   id: string;
